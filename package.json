@@ -1,0 +1,12 @@
+{
+  "name": "florical",
+  "version": "1.0.0",
+  "description": "Calculadora de cotizaciones para florería",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2"
+  }
+}

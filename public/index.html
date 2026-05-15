@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FloriCalc 🌸</title>
+  <link rel="stylesheet" href="style.css" />
+
+  <!-- SheetJS — leer archivos Excel -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <!-- jsPDF — generar PDFs -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <!-- html2canvas — capturar la cotización como imagen -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════
+     FONDO: Esferas flotantes
+     ═══════════════════════════════════════ -->
+<div class="spheres-bg">
+  <div class="sphere s1"></div>
+  <div class="sphere s2 purple"></div>
+  <div class="sphere s3 purple"></div>
+  <div class="sphere s4 pink"></div>
+  <div class="sphere s5"></div>
+  <div class="sphere s6"></div>
+  <div class="sphere s7 purple"></div>
+  <div class="sphere s8 pink"></div>
+</div>
+
+<!-- ═══════════════════════════════════════
+     VISTA: LOGIN
+     ═══════════════════════════════════════ -->
+<div id="view-login" class="view">
+  <div class="login-logo">Flori<span>Calc</span></div>
+  <div class="login-tagline">Cotizaciones profesionales para tu florería 🌸</div>
+
+  <div class="login-card">
+    <h2>Bienvenida</h2>
+    <p>Ingresa tu código de acceso para continuar</p>
+
+    <div class="input-group">
+      <label class="input-label" for="code-input">Código de acceso</label>
+      <input
+        id="code-input"
+        class="input-field"
+        type="text"
+        placeholder="Ej: FLORISTA01"
+        autocomplete="off"
+        autocapitalize="characters"
+      />
+    </div>
+
+    <button class="btn btn-primary" id="btn-login">Entrar</button>
+
+    <div id="login-error" class="login-error">
+      Código incorrecto. Verifica e intenta de nuevo.
+    </div>
+  </div>
+
+  <div class="login-footer">
+    ¿No tienes acceso? Contacta al administrador.
+  </div>
+</div>
+
+
+<!-- ═══════════════════════════════════════
+     VISTA: PERFIL DEL NEGOCIO (primera vez)
+     ═══════════════════════════════════════ -->
+<div id="view-profile" class="view">
+  <div class="profile-header">
+    <h1>Tu negocio</h1>
+    <p>Esta información aparecerá en todas tus cotizaciones</p>
+  </div>
+
+  <div class="container">
+    <!-- Logo -->
+    <div class="logo-upload-wrap">
+      <div class="logo-upload-circle" id="logo-circle" onclick="document.getElementById('logo-file').click()">
+        <div class="logo-placeholder" id="logo-placeholder">🌸</div>
+        <img id="logo-preview" src="" alt="Logo" style="display:none;" />
+      </div>
+      <div class="logo-hint" onclick="document.getElementById('logo-file').click()">+ Subir logo</div>
+      <input type="file" id="logo-file" accept="image/*" style="display:none;" />
+    </div>
+
+    <div class="card">
+      <div class="input-group">
+        <label class="input-label" for="biz-name">Nombre del negocio</label>
+        <input id="biz-name" class="input-field" type="text" placeholder="Flores y Arte" />
+      </div>
+      <div class="input-group">
+        <label class="input-label" for="biz-address">Dirección</label>
+        <input id="biz-address" class="input-field" type="text" placeholder="Calle Primavera 42, Col. Jardín" />
+      </div>
+      <div class="row-2">
+        <div class="input-group">
+          <label class="input-label" for="biz-phone">Teléfono</label>
+          <input id="biz-phone" class="input-field" type="tel" placeholder="55 1234 5678" />
+        </div>
+        <div class="input-group">
+          <label class="input-label" for="biz-email">Email</label>
+          <input id="biz-email" class="input-field" type="email" placeholder="hola@flores.mx" />
+        </div>
+      </div>
+    </div>
+
+    <button class="btn btn-primary" id="btn-save-profile">Guardar y continuar →</button>
+
+    <div class="text-center mt-16">
+      <a href="#" id="skip-profile" class="text-muted text-sm">Completar más tarde</a>
+    </div>
+  </div>
+</div>
+
+
+<!-- ═══════════════════════════════════════
+     VISTA: HOME / DASHBOARD
+     ═══════════════════════════════════════ -->
+<div id="view-home" class="view">
+  <div class="top-bar">
+    <div class="app-name">Flori<span>Calc</span></div>
+    <button class="avatar-btn" id="btn-go-profile" title="Editar perfil">
+      <div class="avatar-placeholder" id="home-avatar">🌸</div>
+    </button>
+  </div>
+
+  <div class="home-greeting">
+    <h1 id="home-greeting-name">¡Hola! 👋</h1>
+    <p>¿Qué hacemos hoy?</p>
+  </div>
+
+  <div class="container">
+    <!-- Estado del catálogo -->
+    <div class="card">
+      <div class="section-title">Estado del catálogo</div>
+      <div class="status-row">
+        <span class="status-label">🌸 Flores cargadas</span>
+        <span class="status-value accent" id="stat-flores">0</span>
+      </div>
+      <div class="status-row">
+        <span class="status-label">🔧 Mecánicos cargados</span>
+        <span class="status-value accent" id="stat-mec">0</span>
+      </div>
+    </div>
+
+    <!-- Importar Excel -->
+    <div class="import-zone" id="import-zone" onclick="document.getElementById('excel-file').click()">
+      <div class="import-icon">📂</div>
+      <h3 id="import-zone-title">Importar catálogo Excel</h3>
+      <p id="import-zone-sub">Sube tu archivo de la calculadora de florería</p>
+    </div>
+    <input type="file" id="excel-file" accept=".xlsx,.xls" style="display:none;" />
+
+    <!-- CTA principal -->
+    <button class="btn btn-primary btn-icon mt-8" id="btn-nueva-cotizacion">
+      ✨ Nueva Cotización
+    </button>
+
+    <div class="text-center mt-16 text-muted text-sm" id="no-catalog-warning" style="display:none;">
+      Importa tu catálogo primero para poder crear cotizaciones.
+    </div>
+  </div>
+</div>
+
+
+<!-- ═══════════════════════════════════════
+     VISTA: CALCULADORA
+     ═══════════════════════════════════════ -->
+<div id="view-calculator" class="view">
+  <div class="calc-header">
+    <button class="back-btn" id="btn-calc-back">← Inicio</button>
+    <h1>Nueva cotización</h1>
+    <p>Agrega flores y materiales al proyecto</p>
+  </div>
+
+  <div class="container">
+    <!-- Datos del proyecto -->
+    <div class="card">
+      <div class="section-title">Datos del proyecto</div>
+      <div class="input-group">
+        <label class="input-label" for="proj-nombre">Nombre del proyecto</label>
+        <input id="proj-nombre" class="input-field" type="text" placeholder="Boda García · Marzo 2025" />
+      </div>
+      <div class="row-2">
+        <div class="input-group">
+          <label class="input-label" for="proj-cliente">Cliente</label>
+          <input id="proj-cliente" class="input-field" type="text" placeholder="Ana García" />
+        </div>
+        <div class="input-group">
+          <label class="input-label" for="proj-fecha">Fecha</label>
+          <input id="proj-fecha" class="input-field" type="date" />
+        </div>
+      </div>
+    </div>
+
+    <!-- Agregar ítem -->
+    <div class="card">
+      <div class="section-title">Agregar ítem</div>
+
+      <!-- Toggle tipo -->
+      <div class="type-toggle">
+        <button class="type-btn active" id="type-flor" onclick="setType('Flor')">🌸 Flor</button>
+        <button class="type-btn" id="type-mec"  onclick="setType('Mecánico')">🔧 Mecánico</button>
+      </div>
+
+      <!-- Buscador con autocomplete -->
+      <div class="input-group">
+        <label class="input-label" for="search-input">Producto</label>
+        <div class="autocomplete-wrap">
+          <input
+            id="search-input"
+            class="input-field"
+            type="text"
+            placeholder="Escribe para buscar..."
+            autocomplete="off"
+          />
+          <div id="autocomplete-list" class="autocomplete-list"></div>
+        </div>
+      </div>
+
+      <!-- Cantidad -->
+      <div class="row-2">
+        <div class="input-group">
+          <label class="input-label" for="qty-input">Cantidad</label>
+          <input id="qty-input" class="input-field" type="number" min="0.5" step="0.5" placeholder="1" />
+        </div>
+        <div class="input-group">
+          <label class="input-label">Precio unitario</label>
+          <div class="input-field" id="price-display" style="color:var(--text-2);">—</div>
+        </div>
+      </div>
+
+      <button class="btn btn-primary" id="btn-add-item">+ Agregar</button>
+    </div>
+
+    <!-- Lista de ítems -->
+    <div class="card">
+      <div class="section-title">Ítems del proyecto</div>
+      <div id="items-list" class="items-list">
+        <p class="text-center text-muted text-sm" style="padding:20px 0;">
+          Aún no hay ítems. Agrega flores y materiales arriba.
+        </p>
+      </div>
+    </div>
+
+    <!-- Resumen de totales -->
+    <div class="card totals-card" id="totals-card" style="display:none;">
+      <div class="section-title">Resumen</div>
+
+      <div class="total-row">
+        <span class="lbl">🌸 Total Flores</span>
+        <span class="val" id="total-flores">$0.00</span>
+      </div>
+      <div class="total-row">
+        <span class="lbl">🔧 Total Mecánico</span>
+        <span class="val" id="total-mecanico">$0.00</span>
+      </div>
+      <div class="total-row">
+        <span class="lbl">📦 Costo base</span>
+        <span class="val" id="costo-base">$0.00</span>
+      </div>
+      <div class="total-row">
+        <span class="lbl">💰 Utilidad estimada</span>
+        <span class="val util" id="utilidad">$0.00</span>
+      </div>
+      <div class="total-row grand">
+        <span class="lbl">TOTAL (IVA inc.)</span>
+        <span class="val" id="total-general">$0.00</span>
+      </div>
+    </div>
+
+    <!-- Botón ver cotización -->
+    <button class="btn btn-primary btn-icon hidden" id="btn-ver-cotizacion">
+      📄 Ver Cotización
+    </button>
+  </div>
+</div>
+
+
+<!-- ═══════════════════════════════════════
+     VISTA: COTIZACIÓN FINAL
+     ═══════════════════════════════════════ -->
+<div id="view-quote" class="view">
+
+  <!-- Botones de acción (no se incluyen en el PDF) -->
+  <div class="quote-actions">
+    <button class="back-btn" id="btn-quote-back">← Editar</button>
+  </div>
+  <div class="quote-actions mt-8">
+    <button class="btn btn-outline btn-sm btn-icon" id="btn-download-pdf">
+      ⬇ Descargar PDF
+    </button>
+    <button class="btn btn-primary btn-sm btn-icon" id="btn-whatsapp">
+      📱 WhatsApp
+    </button>
+  </div>
+
+  <!-- ── Documento cotización (se captura para PDF) ── -->
+  <div id="quote-doc" class="container">
+
+    <!-- Cabecera con gradiente magenta -->
+    <div class="quote-doc-header">
+      <div id="q-logo-wrap">
+        <!-- Logo o placeholder -->
+        <div class="quote-doc-logo-placeholder" id="q-logo-placeholder">🌸</div>
+        <img id="q-logo-img" class="quote-doc-logo" src="" alt="Logo" style="display:none;" />
+      </div>
+
+      <div class="quote-biz-name" id="q-biz-name">Mi Florería</div>
+      <div class="quote-biz-meta" id="q-biz-meta"></div>
+
+      <div class="quote-id-row">
+        <div>
+          <div class="quote-label">Cotización</div>
+          <div class="quote-number" id="q-number">#FC-000000</div>
+        </div>
+        <div class="quote-date" id="q-date"></div>
+      </div>
+    </div>
+
+    <!-- Cliente y proyecto -->
+    <div class="quote-client-block">
+      <div class="quote-client-label">Para</div>
+      <div class="quote-client-name" id="q-client">—</div>
+      <div class="quote-project-name" id="q-project">—</div>
+    </div>
+
+    <!-- Tabla de ítems -->
+    <div class="quote-items">
+      <div class="quote-table-head">
+        <div>Producto</div>
+        <div>Cant.</div>
+        <div class="th-right">P. Unit.</div>
+        <div class="th-right">Total</div>
+      </div>
+      <div id="q-items-list"></div>
+    </div>
+
+    <!-- Totales del documento -->
+    <div class="quote-totals container" style="padding-left:28px; padding-right:28px; margin:0;">
+      <div class="qt-row">
+        <span>🌸 Flores</span>
+        <span class="qt-val" id="q-total-flores">$0.00</span>
+      </div>
+      <div class="qt-row">
+        <span>🔧 Mecánico</span>
+        <span class="qt-val" id="q-total-mec">$0.00</span>
+      </div>
+      <div class="qt-row grand">
+        <span>TOTAL</span>
+        <span class="qt-val" id="q-grand-total">$0.00</span>
+      </div>
+    </div>
+
+    <!-- Pie del documento -->
+    <div class="quote-footer" id="q-footer">
+      Precios con IVA incluido · Vigencia 15 días<br/>
+      <span id="q-footer-contact"></span>
+    </div>
+
+  </div><!-- /quote-doc -->
+</div>
+
+
+<!-- ── Loading overlay ── -->
+<div class="loading-overlay" id="loading">
+  <div class="spinner"></div>
+  <div class="loading-txt" id="loading-txt">Procesando...</div>
+</div>
+
+<!-- ── Toast de notificaciones ── -->
+<div id="toast"></div>
+
+<script src="script.js"></script>
+</body>
+</html>
