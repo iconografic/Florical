@@ -1,378 +1,431 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>FloriCalc 🌸</title>
-  <link rel="stylesheet" href="style.css" />
-
-  <!-- SheetJS — leer archivos Excel -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-  <!-- jsPDF — generar PDFs -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-  <!-- html2canvas — capturar la cotización como imagen -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0"/>
+  <title>FloriCalc</title>
+  <link rel="stylesheet" href="style.css"/>
 </head>
 <body>
 
-<!-- ═══════════════════════════════════════
-     FONDO: Esferas flotantes
-     ═══════════════════════════════════════ -->
-<div class="spheres-bg">
-  <div class="sphere s1"></div>
-  <div class="sphere s2 purple"></div>
-  <div class="sphere s3 purple"></div>
-  <div class="sphere s4 pink"></div>
-  <div class="sphere s5"></div>
-  <div class="sphere s6"></div>
-  <div class="sphere s7 purple"></div>
-  <div class="sphere s8 pink"></div>
+<!-- Loading overlay -->
+<div id="loading" class="loading-overlay hidden">
+  <div class="loading-spinner"></div>
+  <div id="loading-txt" class="loading-txt">Cargando...</div>
 </div>
 
-<!-- ═══════════════════════════════════════
-     VISTA: LOGIN
-     ═══════════════════════════════════════ -->
-<div id="view-login" class="view">
-  <div class="login-logo">Flori<span>Calc</span></div>
-  <div class="login-tagline">Cotizaciones profesionales para tu florería 🌸</div>
+<!-- Toast -->
+<div id="toast" class="toast hidden"></div>
 
-  <div class="login-card">
-    <h2>Bienvenida</h2>
-    <p>Ingresa tu código de acceso para continuar</p>
-
-    <div class="input-group">
-      <label class="input-label" for="code-input">Código de acceso</label>
-      <input
-        id="code-input"
-        class="input-field"
-        type="text"
-        placeholder="Ej: FLORISTA01"
-        autocomplete="off"
-        autocapitalize="characters"
-      />
+<!-- ── Login ── -->
+<div id="view-login" class="screen">
+  <div class="login-sphere sphere-1"></div>
+  <div class="login-sphere sphere-2"></div>
+  <div class="login-content">
+    <div class="login-logo">🌸</div>
+    <h1 class="login-title">FloriCalc</h1>
+    <p class="login-sub">Tu cotizador profesional</p>
+    <div class="login-box">
+      <input type="text" id="code-input" class="code-input" placeholder="Codigo de acceso" autocomplete="off"/>
+      <button class="btn-primary btn-full" onclick="handleLogin()">Entrar</button>
     </div>
-
-    <button class="btn btn-primary" id="btn-login">Entrar</button>
-
-    <div id="login-error" class="login-error">
-      Código incorrecto. Verifica e intenta de nuevo.
-    </div>
-  </div>
-
-  <div class="login-footer">
-    ¿No tienes acceso? Contacta al administrador.
   </div>
 </div>
 
-
-<!-- ═══════════════════════════════════════
-     VISTA: PERFIL DEL NEGOCIO (primera vez)
-     ═══════════════════════════════════════ -->
-<div id="view-profile" class="view">
-  <div class="profile-header">
-    <h1>Tu negocio</h1>
-    <p>Esta información aparecerá en todas tus cotizaciones</p>
-  </div>
-
-  <div class="container">
-    <!-- Logo -->
-    <div class="logo-upload-wrap">
-      <div class="logo-upload-circle" id="logo-circle" onclick="document.getElementById('logo-file').click()">
-        <div class="logo-placeholder" id="logo-placeholder">🌸</div>
-        <img id="logo-preview" src="" alt="Logo" style="display:none;" />
-      </div>
-      <div class="logo-hint" onclick="document.getElementById('logo-file').click()">+ Subir logo</div>
-      <input type="file" id="logo-file" accept="image/*" style="display:none;" />
+<!-- ── Terms Modal ── -->
+<div id="modal-terms" class="modal-overlay hidden">
+  <div class="modal-box">
+    <h2 class="modal-title">Terminos y Condiciones</h2>
+    <div class="terms-body">
+      <p>Bienvenido a <strong>FloriCalc</strong>. Al usar esta aplicacion aceptas los siguientes terminos:</p>
+      <br/>
+      <p><strong>Uso del servicio</strong><br/>Este servicio es para uso profesional de floristeria.</p>
+      <br/>
+      <p><strong>Almacenamiento de datos</strong><br/>Tu perfil, catalogo y cotizaciones se guardan de forma segura en la nube.</p>
+      <br/>
+      <p><strong>Comunicacion y newsletter</strong><br/>Al proporcionar tu correo electronico, aceptas recibir ocasionalmente informacion sobre actualizaciones, nuevos productos y recursos exclusivos para floristas. Puedes cancelar en cualquier momento.</p>
+      <br/>
+      <p><strong>Privacidad</strong><br/>No compartimos tu informacion con terceros sin tu consentimiento.</p>
     </div>
+    <button class="btn-primary btn-full" onclick="acceptTerms()">Acepto los Terminos</button>
+  </div>
+</div>
 
-    <div class="card">
-      <div class="input-group">
-        <label class="input-label" for="biz-name">Nombre del negocio</label>
-        <input id="biz-name" class="input-field" type="text" placeholder="Flores y Arte" />
+<!-- ── Profile Setup ── -->
+<div id="view-profile-setup" class="screen hidden">
+  <div class="setup-container">
+    <div class="setup-header">
+      <div class="setup-emoji">🌸</div>
+      <h1>Configura tu negocio</h1>
+      <p>Esta informacion aparecera en tus cotizaciones</p>
+    </div>
+    <div class="setup-form">
+      <div class="form-group">
+        <label>Nombre del negocio *</label>
+        <input type="text" id="setup-name" placeholder="Ej: Flores y Suenos" class="form-input"/>
       </div>
-      <div class="input-group">
-        <label class="input-label" for="biz-address">Dirección</label>
-        <input id="biz-address" class="input-field" type="text" placeholder="Calle Primavera 42, Col. Jardín" />
+      <div class="form-group">
+        <label>Telefono</label>
+        <input type="tel" id="setup-phone" placeholder="Ej: +52 55 1234 5678" class="form-input"/>
       </div>
-      <div class="row-2">
-        <div class="input-group">
-          <label class="input-label" for="biz-phone">Teléfono</label>
-          <input id="biz-phone" class="input-field" type="tel" placeholder="55 1234 5678" />
+      <div class="form-group">
+        <label>Correo electronico</label>
+        <input type="email" id="setup-email" placeholder="Ej: floreria@ejemplo.com" class="form-input"/>
+      </div>
+      <div class="form-group">
+        <label>Direccion</label>
+        <input type="text" id="setup-address" placeholder="Ej: Calle Rosas 123, CDMX" class="form-input"/>
+      </div>
+      <div class="form-group">
+        <label>Logo (opcional)</label>
+        <div class="logo-upload-area" onclick="document.getElementById('logo-file').click()">
+          <div id="logo-preview" class="logo-placeholder-upload">Toca para subir logo</div>
         </div>
-        <div class="input-group">
-          <label class="input-label" for="biz-email">Email</label>
-          <input id="biz-email" class="input-field" type="email" placeholder="hola@flores.mx" />
-        </div>
+        <input type="file" id="logo-file" accept="image/*" style="display:none" onchange="handleLogoUpload(event)"/>
       </div>
-    </div>
-
-    <button class="btn btn-primary" id="btn-save-profile">Guardar y continuar →</button>
-
-    <div class="text-center mt-16">
-      <a href="#" id="skip-profile" class="text-muted text-sm">Completar más tarde</a>
+      <button class="btn-primary btn-full" onclick="saveProfileSetup()">Guardar y Continuar</button>
     </div>
   </div>
 </div>
 
+<!-- ── App Shell ── -->
+<div id="app-shell" class="hidden">
 
-<!-- ═══════════════════════════════════════
-     VISTA: HOME / DASHBOARD
-     ═══════════════════════════════════════ -->
-<div id="view-home" class="view">
-  <div class="top-bar">
-    <div class="app-name">Flori<span>Calc</span></div>
-    <button class="avatar-btn" id="btn-go-profile" title="Editar perfil">
-      <div class="avatar-placeholder" id="home-avatar">🌸</div>
+  <div class="views-container">
+
+    <!-- ── Cotizar ── -->
+    <div id="view-cotizar" class="view active">
+      <div class="view-header">
+        <h2>Nueva Cotizacion</h2>
+      </div>
+      <div class="view-content">
+
+        <div class="card">
+          <div class="form-row-2">
+            <div class="form-group">
+              <label>Cliente</label>
+              <input type="text" id="q-client" placeholder="Nombre del cliente" class="form-input"/>
+            </div>
+            <div class="form-group">
+              <label>Proyecto / Evento</label>
+              <input type="text" id="q-project" placeholder="Ej: Boda Garcia" class="form-input"/>
+            </div>
+          </div>
+          <div class="form-row-2">
+            <div class="form-group">
+              <label>Fecha</label>
+              <input type="date" id="q-date" class="form-input"/>
+            </div>
+            <div class="form-group">
+              <label>Envio (MXN)</label>
+              <input type="number" id="q-shipping" placeholder="0" class="form-input" min="0" step="0.01"/>
+            </div>
+          </div>
+        </div>
+
+        <div id="concepts-list"></div>
+
+        <button class="btn-outline btn-full btn-add-concept" onclick="addConcept()">+ Agregar Concepto</button>
+
+        <div class="card totals-card" id="totals-preview" style="display:none">
+          <div class="totals-row">
+            <span>Subtotal (sin IVA)</span>
+            <span id="t-subtotal">$0.00</span>
+          </div>
+          <div class="totals-row">
+            <span>IVA 16%</span>
+            <span id="t-iva">$0.00</span>
+          </div>
+          <div class="totals-row" id="t-ship-row" style="display:none">
+            <span>Envio</span>
+            <span id="t-ship">$0.00</span>
+          </div>
+          <div class="totals-row totals-total">
+            <span>Total</span>
+            <span id="t-total">$0.00</span>
+          </div>
+          <div class="no-delivery-note" id="no-delivery-note">Este costo no incluye entrega</div>
+        </div>
+
+        <div class="form-group">
+          <label>Notas adicionales</label>
+          <textarea id="q-notes" class="form-textarea" placeholder="Condiciones, observaciones..."></textarea>
+        </div>
+
+        <div class="action-row">
+          <button class="btn-outline" onclick="resetQuote()">Limpiar</button>
+          <button class="btn-primary" onclick="saveQuote()">Guardar Cotizacion</button>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- ── Historial ── -->
+    <div id="view-historial" class="view hidden">
+      <div class="view-header">
+        <h2>Cotizaciones</h2>
+        <div class="filter-pills">
+          <button class="pill active" data-status="all" onclick="filterQuotes(this)">Todas</button>
+          <button class="pill" data-status="pending" onclick="filterQuotes(this)">Pendientes</button>
+          <button class="pill" data-status="accepted" onclick="filterQuotes(this)">Aceptadas</button>
+          <button class="pill" data-status="paid" onclick="filterQuotes(this)">Pagadas</button>
+        </div>
+      </div>
+      <div class="view-content">
+        <div id="quotes-list" class="quotes-list"></div>
+      </div>
+    </div>
+
+    <!-- ── Quote Detail ── -->
+    <div id="view-quote-detail" class="view hidden">
+      <div class="view-header">
+        <button class="back-btn" onclick="goBack()">&#8592; Volver</button>
+        <h2 id="detail-quote-number">Cotizacion</h2>
+        <div class="header-actions">
+          <button class="btn-icon" onclick="shareWhatsApp()" title="WhatsApp">&#128241;</button>
+          <button class="btn-icon" onclick="generatePDF()" title="PDF">&#128196;</button>
+        </div>
+      </div>
+      <div class="view-content" id="detail-content"></div>
+    </div>
+
+    <!-- ── Order ── -->
+    <div id="view-order" class="view hidden">
+      <div class="view-header">
+        <button class="back-btn" onclick="goBack()">&#8592; Volver</button>
+        <h2>Orden de Pago</h2>
+      </div>
+      <div class="view-content" id="order-content"></div>
+    </div>
+
+    <!-- ── Reportes ── -->
+    <div id="view-reportes" class="view hidden">
+      <div class="view-header">
+        <h2>Reportes</h2>
+      </div>
+      <div class="view-content">
+        <div class="card">
+          <h3 class="card-title">Reporte de Ventas</h3>
+          <p class="card-desc">Descarga un Excel con todas tus cotizaciones: totales, costos y utilidades.</p>
+          <div class="form-row-2">
+            <div class="form-group">
+              <label>Desde</label>
+              <input type="date" id="rep-from" class="form-input"/>
+            </div>
+            <div class="form-group">
+              <label>Hasta</label>
+              <input type="date" id="rep-to" class="form-input"/>
+            </div>
+          </div>
+          <button class="btn-primary btn-full" onclick="downloadReport()">Descargar Excel</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Cuenta ── -->
+    <div id="view-cuenta" class="view hidden">
+      <div class="view-header">
+        <h2>Mi Cuenta</h2>
+      </div>
+      <div class="view-content">
+
+        <div class="card">
+          <div class="section-header">
+            <h3>Perfil del negocio</h3>
+            <button class="btn-text" onclick="toggleEditProfile()">Editar</button>
+          </div>
+          <div id="profile-display">
+            <div id="profile-logo-display"></div>
+            <div id="profile-info-display"></div>
+          </div>
+          <div id="profile-edit" class="hidden">
+            <div class="form-group">
+              <label>Nombre del negocio</label>
+              <input type="text" id="edit-name" class="form-input"/>
+            </div>
+            <div class="form-group">
+              <label>Telefono</label>
+              <input type="tel" id="edit-phone" class="form-input"/>
+            </div>
+            <div class="form-group">
+              <label>Correo electronico</label>
+              <input type="email" id="edit-email" class="form-input"/>
+            </div>
+            <div class="form-group">
+              <label>Direccion</label>
+              <input type="text" id="edit-address" class="form-input"/>
+            </div>
+            <div class="form-group">
+              <label>Logo</label>
+              <div class="logo-upload-area" onclick="document.getElementById('edit-logo-file').click()">
+                <div id="edit-logo-preview" class="logo-placeholder-upload">Toca para cambiar logo</div>
+              </div>
+              <input type="file" id="edit-logo-file" accept="image/*" style="display:none" onchange="handleEditLogoUpload(event)"/>
+            </div>
+            <div class="form-row-2">
+              <button class="btn-outline" onclick="cancelEditProfile()">Cancelar</button>
+              <button class="btn-primary" onclick="saveProfile()">Guardar</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="section-header">
+            <h3>Cuentas bancarias</h3>
+            <button class="btn-text" onclick="openAddBank()">+ Agregar</button>
+          </div>
+          <div id="bank-accounts-list"></div>
+        </div>
+
+        <div class="card">
+          <div class="section-header">
+            <h3>Catalogo de materiales</h3>
+          </div>
+          <div id="catalog-bar">
+            <div class="catalog-tabs">
+              <button class="cat-tab active" data-type="flores" onclick="switchCatalogTab(this)">Flores</button>
+              <button class="cat-tab" data-type="mecanico" onclick="switchCatalogTab(this)">Mecanico</button>
+            </div>
+            <div id="cat-flores" class="cat-section">
+              <div id="flores-items" class="catalog-items"></div>
+              <button class="btn-outline btn-sm" onclick="addCatalogItem('flores')">+ Agregar flor</button>
+            </div>
+            <div id="cat-mecanico" class="cat-section hidden">
+              <div id="mecanico-items" class="catalog-items"></div>
+              <button class="btn-outline btn-sm" onclick="addCatalogItem('mecanico')">+ Agregar material</button>
+            </div>
+            <button class="btn-primary btn-full" onclick="saveCatalog()" style="margin-top:12px">Guardar catalogo</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <button class="btn-danger btn-full" onclick="logout()">Cerrar sesion</button>
+        </div>
+
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Bottom Nav -->
+  <nav id="bottom-nav" class="bottom-nav">
+    <button class="nav-item active" data-view="cotizar" onclick="switchView('cotizar', this)">
+      <span class="nav-icon">&#9999;</span>
+      <span class="nav-label">Cotizar</span>
     </button>
-  </div>
-
-  <div class="home-greeting">
-    <h1 id="home-greeting-name">¡Hola! 👋</h1>
-    <p>¿Qué hacemos hoy?</p>
-  </div>
-
-  <div class="container">
-    <!-- Estado del catálogo -->
-    <div class="card">
-      <div class="section-title">Estado del catálogo</div>
-      <div class="status-row">
-        <span class="status-label">🌸 Flores cargadas</span>
-        <span class="status-value accent" id="stat-flores">0</span>
-      </div>
-      <div class="status-row">
-        <span class="status-label">🔧 Mecánicos cargados</span>
-        <span class="status-value accent" id="stat-mec">0</span>
-      </div>
-    </div>
-
-    <!-- Importar Excel -->
-    <div class="import-zone" id="import-zone" onclick="document.getElementById('excel-file').click()">
-      <div class="import-icon">📂</div>
-      <h3 id="import-zone-title">Importar catálogo Excel</h3>
-      <p id="import-zone-sub">Sube tu archivo de la calculadora de florería</p>
-    </div>
-    <input type="file" id="excel-file" accept=".xlsx,.xls" style="display:none;" />
-
-    <!-- CTA principal -->
-    <button class="btn btn-primary btn-icon mt-8" id="btn-nueva-cotizacion">
-      ✨ Nueva Cotización
+    <button class="nav-item" data-view="historial" onclick="switchView('historial', this)">
+      <span class="nav-icon">&#128203;</span>
+      <span class="nav-label">Historial</span>
     </button>
+    <button class="nav-item" data-view="reportes" onclick="switchView('reportes', this)">
+      <span class="nav-icon">&#128202;</span>
+      <span class="nav-label">Reportes</span>
+    </button>
+    <button class="nav-item" data-view="cuenta" onclick="switchView('cuenta', this)">
+      <span class="nav-icon">&#128100;</span>
+      <span class="nav-label">Cuenta</span>
+    </button>
+  </nav>
 
-    <div class="text-center mt-16 text-muted text-sm" id="no-catalog-warning" style="display:none;">
-      Importa tu catálogo primero para poder crear cotizaciones.
+</div>
+
+<!-- ── Modal: Payment ── -->
+<div id="modal-payment" class="modal-overlay hidden">
+  <div class="modal-box">
+    <div class="modal-header">
+      <h3>Registrar Pago</h3>
+      <button class="modal-close" onclick="closeModal('modal-payment')">&#10005;</button>
+    </div>
+    <div class="form-group">
+      <label>Estado</label>
+      <select id="pay-status" class="form-input">
+        <option value="accepted">Aceptada</option>
+        <option value="paid">Pagada</option>
+        <option value="cancelled">Cancelada</option>
+      </select>
+    </div>
+    <div id="pay-bank-section">
+      <div class="form-group">
+        <label>Cuenta bancaria</label>
+        <select id="pay-bank" class="form-input"></select>
+      </div>
+      <div class="form-group">
+        <label>Anticipo recibido (MXN)</label>
+        <input type="number" id="pay-anticipo" placeholder="0.00" class="form-input" min="0" step="0.01"/>
+      </div>
+      <div class="pay-remaining-row">
+        <span>Restante por cobrar:</span>
+        <span id="pay-remaining" class="pay-remaining-val">$0.00</span>
+      </div>
+    </div>
+    <div class="form-row-2" style="margin-top:16px">
+      <button class="btn-outline" onclick="closeModal('modal-payment')">Cancelar</button>
+      <button class="btn-primary" onclick="savePayment()">Guardar</button>
     </div>
   </div>
 </div>
 
-
-<!-- ═══════════════════════════════════════
-     VISTA: CALCULADORA
-     ═══════════════════════════════════════ -->
-<div id="view-calculator" class="view">
-  <div class="calc-header">
-    <button class="back-btn" id="btn-calc-back">← Inicio</button>
-    <h1>Nueva cotización</h1>
-    <p>Agrega flores y materiales al proyecto</p>
-  </div>
-
-  <div class="container">
-    <!-- Datos del proyecto -->
-    <div class="card">
-      <div class="section-title">Datos del proyecto</div>
-      <div class="input-group">
-        <label class="input-label" for="proj-nombre">Nombre del proyecto</label>
-        <input id="proj-nombre" class="input-field" type="text" placeholder="Boda García · Marzo 2025" />
-      </div>
-      <div class="row-2">
-        <div class="input-group">
-          <label class="input-label" for="proj-cliente">Cliente</label>
-          <input id="proj-cliente" class="input-field" type="text" placeholder="Ana García" />
-        </div>
-        <div class="input-group">
-          <label class="input-label" for="proj-fecha">Fecha</label>
-          <input id="proj-fecha" class="input-field" type="date" />
-        </div>
-      </div>
+<!-- ── Modal: Bank ── -->
+<div id="modal-bank" class="modal-overlay hidden">
+  <div class="modal-box">
+    <div class="modal-header">
+      <h3 id="bank-modal-title">Nueva Cuenta Bancaria</h3>
+      <button class="modal-close" onclick="closeModal('modal-bank')">&#10005;</button>
     </div>
-
-    <!-- Agregar ítem -->
-    <div class="card">
-      <div class="section-title">Agregar ítem</div>
-
-      <!-- Toggle tipo -->
-      <div class="type-toggle">
-        <button class="type-btn active" id="type-flor" onclick="setType('Flor')">🌸 Flor</button>
-        <button class="type-btn" id="type-mec"  onclick="setType('Mecánico')">🔧 Mecánico</button>
-      </div>
-
-      <!-- Buscador con autocomplete -->
-      <div class="input-group">
-        <label class="input-label" for="search-input">Producto</label>
-        <div class="autocomplete-wrap">
-          <input
-            id="search-input"
-            class="input-field"
-            type="text"
-            placeholder="Escribe para buscar..."
-            autocomplete="off"
-          />
-          <div id="autocomplete-list" class="autocomplete-list"></div>
-        </div>
-      </div>
-
-      <!-- Cantidad -->
-      <div class="row-2">
-        <div class="input-group">
-          <label class="input-label" for="qty-input">Cantidad</label>
-          <input id="qty-input" class="input-field" type="number" min="0.5" step="0.5" placeholder="1" />
-        </div>
-        <div class="input-group">
-          <label class="input-label">Precio unitario</label>
-          <div class="input-field" id="price-display" style="color:var(--text-2);">—</div>
-        </div>
-      </div>
-
-      <button class="btn btn-primary" id="btn-add-item">+ Agregar</button>
+    <div class="form-group">
+      <label>Nombre / Banco</label>
+      <input type="text" id="bank-name" placeholder="Ej: BBVA, PayPal, Efectivo" class="form-input"/>
     </div>
-
-    <!-- Lista de ítems -->
-    <div class="card">
-      <div class="section-title">Ítems del proyecto</div>
-      <div id="items-list" class="items-list">
-        <p class="text-center text-muted text-sm" style="padding:20px 0;">
-          Aún no hay ítems. Agrega flores y materiales arriba.
-        </p>
-      </div>
+    <div class="form-group">
+      <label>Detalles (CLABE, numero de cuenta, etc.)</label>
+      <textarea id="bank-details" class="form-textarea" placeholder="CLABE: 0123456789012345&#10;A nombre de: Tu Nombre"></textarea>
     </div>
-
-    <!-- Resumen de totales -->
-    <div class="card totals-card" id="totals-card" style="display:none;">
-      <div class="section-title">Resumen</div>
-
-      <div class="total-row">
-        <span class="lbl">🌸 Total Flores</span>
-        <span class="val" id="total-flores">$0.00</span>
-      </div>
-      <div class="total-row">
-        <span class="lbl">🔧 Total Mecánico</span>
-        <span class="val" id="total-mecanico">$0.00</span>
-      </div>
-      <div class="total-row">
-        <span class="lbl">📦 Costo base</span>
-        <span class="val" id="costo-base">$0.00</span>
-      </div>
-      <div class="total-row">
-        <span class="lbl">💰 Utilidad estimada</span>
-        <span class="val util" id="utilidad">$0.00</span>
-      </div>
-      <div class="total-row grand">
-        <span class="lbl">TOTAL (IVA inc.)</span>
-        <span class="val" id="total-general">$0.00</span>
-      </div>
+    <div class="form-group checkbox-group">
+      <label class="checkbox-label">
+        <input type="checkbox" id="bank-default"/>
+        <span>Cuenta predeterminada</span>
+      </label>
     </div>
-
-    <!-- Botón ver cotización -->
-    <button class="btn btn-primary btn-icon hidden" id="btn-ver-cotizacion">
-      📄 Ver Cotización
-    </button>
+    <div class="form-row-2">
+      <button class="btn-outline" onclick="closeModal('modal-bank')">Cancelar</button>
+      <button class="btn-primary" onclick="saveBank()">Guardar</button>
+    </div>
   </div>
 </div>
 
-
-<!-- ═══════════════════════════════════════
-     VISTA: COTIZACIÓN FINAL
-     ═══════════════════════════════════════ -->
-<div id="view-quote" class="view">
-
-  <!-- Botones de acción (no se incluyen en el PDF) -->
-  <div class="quote-actions">
-    <button class="back-btn" id="btn-quote-back">← Editar</button>
+<!-- ── Modal: WhatsApp ── -->
+<div id="modal-whatsapp" class="modal-overlay hidden">
+  <div class="modal-box modal-wa">
+    <div class="modal-header">
+      <h3>Enviar por WhatsApp</h3>
+      <button class="modal-close" onclick="closeModal('modal-whatsapp')">&#10005;</button>
+    </div>
+    <div class="form-group">
+      <label>Saludo</label>
+      <input type="text" id="wa-greeting" class="form-input" placeholder="Hola [nombre],"/>
+    </div>
+    <div class="form-group">
+      <label>Nota personal</label>
+      <textarea id="wa-note" class="form-textarea" placeholder="Con gusto te comparto esta cotizacion..."></textarea>
+    </div>
+    <div class="form-group">
+      <label>Firma</label>
+      <input type="text" id="wa-signature" class="form-input" placeholder="Tu nombre o nombre del negocio"/>
+    </div>
+    <div class="wa-preview-label">Vista previa:</div>
+    <div id="wa-preview" class="wa-preview"></div>
+    <div class="form-row-2" style="margin-top:16px">
+      <button class="btn-outline" onclick="closeModal('modal-whatsapp')">Cancelar</button>
+      <button class="btn-wa" onclick="sendWhatsApp()">Enviar WhatsApp</button>
+    </div>
   </div>
-  <div class="quote-actions mt-8">
-    <button class="btn btn-outline btn-sm btn-icon" id="btn-download-pdf">
-      ⬇ Descargar PDF
-    </button>
-    <button class="btn btn-primary btn-sm btn-icon" id="btn-whatsapp">
-      📱 WhatsApp
-    </button>
-  </div>
-
-  <!-- ── Documento cotización (se captura para PDF) ── -->
-  <div id="quote-doc" class="container">
-
-    <!-- Cabecera con gradiente magenta -->
-    <div class="quote-doc-header">
-      <div id="q-logo-wrap">
-        <!-- Logo o placeholder -->
-        <div class="quote-doc-logo-placeholder" id="q-logo-placeholder">🌸</div>
-        <img id="q-logo-img" class="quote-doc-logo" src="" alt="Logo" style="display:none;" />
-      </div>
-
-      <div class="quote-biz-name" id="q-biz-name">Mi Florería</div>
-      <div class="quote-biz-meta" id="q-biz-meta"></div>
-
-      <div class="quote-id-row">
-        <div>
-          <div class="quote-label">Cotización</div>
-          <div class="quote-number" id="q-number">#FC-000000</div>
-        </div>
-        <div class="quote-date" id="q-date"></div>
-      </div>
-    </div>
-
-    <!-- Cliente y proyecto -->
-    <div class="quote-client-block">
-      <div class="quote-client-label">Para</div>
-      <div class="quote-client-name" id="q-client">—</div>
-      <div class="quote-project-name" id="q-project">—</div>
-    </div>
-
-    <!-- Tabla de ítems -->
-    <div class="quote-items">
-      <div class="quote-table-head">
-        <div>Producto</div>
-        <div>Cant.</div>
-        <div class="th-right">P. Unit.</div>
-        <div class="th-right">Total</div>
-      </div>
-      <div id="q-items-list"></div>
-    </div>
-
-    <!-- Totales del documento -->
-    <div class="quote-totals container" style="padding-left:28px; padding-right:28px; margin:0;">
-      <div class="qt-row">
-        <span>🌸 Flores</span>
-        <span class="qt-val" id="q-total-flores">$0.00</span>
-      </div>
-      <div class="qt-row">
-        <span>🔧 Mecánico</span>
-        <span class="qt-val" id="q-total-mec">$0.00</span>
-      </div>
-      <div class="qt-row grand">
-        <span>TOTAL</span>
-        <span class="qt-val" id="q-grand-total">$0.00</span>
-      </div>
-    </div>
-
-    <!-- Pie del documento -->
-    <div class="quote-footer" id="q-footer">
-      Precios con IVA incluido · Vigencia 15 días<br/>
-      <span id="q-footer-contact"></span>
-    </div>
-
-  </div><!-- /quote-doc -->
 </div>
 
+<!-- Hidden doc for PDF -->
+<div id="detail-quote-doc" class="hidden-print"></div>
 
-<!-- ── Loading overlay ── -->
-<div class="loading-overlay" id="loading">
-  <div class="spinner"></div>
-  <div class="loading-txt" id="loading-txt">Procesando...</div>
-</div>
-
-<!-- ── Toast de notificaciones ── -->
-<div id="toast"></div>
-
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <script src="script.js"></script>
 </body>
 </html>

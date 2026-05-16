@@ -1,668 +1,1038 @@
-/* =============================================
-   FLORICAL — Lógica principal
-   ============================================= */
-
-// ── Estado global de la app ──────────────────
+// ── State ──
 const state = {
-  flores:   [],   // [{nombre, proveedor, unidad, costoUnitario, precio}]
-  mecanico: [],   // [{nombre, unidad, costoUnitario, precio}]
-  profile:  null, // {name, address, phone, email, logoDataUrl}
-  project: {
-    nombre:  '',
-    cliente: '',
-    fecha:   '',
-    items:   []   // [{tipo, nombre, unidad, cantidad, precioUnitario, costoUnitario, subtotal}]
-  },
-  selectedItem: null, // ítem seleccionado del autocomplete
-  currentType:  'Flor'
+  token: null,
+  profile: {},
+  catalog: { flores: [], mecanico: [] },
+  concepts: [],
+  quotes: [],
+  currentQuote: null,
+  currentQuoteId: null,
+  currentView: 'cotizar',
+  prevView: 'historial',
+  bankAccounts: [],
+  editingBankId: null,
+  setupLogoDataUrl: null,
+  editLogoDataUrl: null
 };
 
-// ── Helpers básicos ──────────────────────────
-const $  = id => document.getElementById(id);
-const fmt = n  => '$' + (parseFloat(n) || 0).toFixed(2);
-
-function showView(id) {
-  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
-  $(id).classList.add('active');
-  window.scrollTo(0, 0);
+// ── API ──
+async function api(method, path, body) {
+  const headers = { 'Content-Type': 'application/json' };
+  if (state.token) headers['Authorization'] = 'Bearer ' + state.token;
+  const opts = { method, headers };
+  if (body !== undefined) opts.body = JSON.stringify(body);
+  const res = await fetch(path, opts);
+  if (!res.ok && res.status === 401) { logout(); return {}; }
+  return res.json().catch(() => ({}));
 }
 
-function showToast(msg) {
-  const t = $('toast');
+// ── Helpers ──
+function show(id) {
+  const el = document.getElementById(id);
+  if (el) el.classList.remove('hidden');
+}
+function hide(id) {
+  const el = document.getElementById(id);
+  if (el) el.classList.add('hidden');
+}
+function showLoading(txt) {
+  const el = document.getElementById('loading-txt');
+  if (el) el.textContent = txt || 'Cargando...';
+  show('loading');
+}
+function hideLoading() { hide('loading'); }
+
+function showToast(msg, type) {
+  const t = document.getElementById('toast');
+  if (!t) return;
   t.textContent = msg;
-  t.classList.add('show');
-  setTimeout(() => t.classList.remove('show'), 3000);
+  t.className = 'toast show' + (type ? ' ' + type : '');
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => { t.className = 'toast hidden'; }, 3200);
 }
+function openModal(id) { show(id); }
+function closeModal(id) { hide(id); }
 
-function showLoading(txt = 'Procesando...') {
-  $('loading-txt').textContent = txt;
-  $('loading').classList.add('show');
+function escHtml(str) {
+  if (str === null || str === undefined) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
 }
-
-function hideLoading() {
-  $('loading').classList.remove('show');
+function escJs(str) {
+  if (!str) return '';
+  return String(str).replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '\\"');
 }
-
-function quoteNumber() {
-  return 'FC-' + Date.now().toString().slice(-6);
+function formatCurrency(val) {
+  const n = parseFloat(val) || 0;
+  return '$' + n.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
-
-// ── AUTH: códigos válidos (fallback cliente) ──
-// Agrega o quita códigos aquí para controlar el acceso
-const VALID_CODES = ['FLORISTA01', 'DEMO2024', 'ACCESO01'];
-
-// Verifica primero con el servidor; si no hay servidor (archivo abierto directo),
-// usa la lista local VALID_CODES como respaldo.
-async function verifyCode(code) {
-  const normalized = code.trim().toUpperCase();
-
+function formatCurrencyPlain(val) {
+  const n = parseFloat(val) || 0;
+  return '$' + n.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+}
+function formatDate(dateStr) {
+  if (!dateStr) return '';
   try {
-    const res = await fetch('/api/verify-code', {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ code }),
-      signal:  AbortSignal.timeout(3000) // 3 seg máximo
-    });
-    const data = await res.json();
-    return data.valid;
-  } catch {
-    // Sin servidor (archivo abierto directo) → verificar localmente
-    return VALID_CODES.map(c => c.toUpperCase()).includes(normalized);
-  }
+    const d = new Date(dateStr + 'T12:00:00');
+    return d.toLocaleDateString('es-MX', { year: 'numeric', month: 'short', day: 'numeric' });
+  } catch(e) { return dateStr; }
 }
 
-// ── PERFIL: guardar y leer desde localStorage ─
-function saveProfile(profile) {
-  localStorage.setItem('florical_profile', JSON.stringify(profile));
-  state.profile = profile;
-}
-
-function loadProfile() {
-  const raw = localStorage.getItem('florical_profile');
-  return raw ? JSON.parse(raw) : null;
-}
-
-function applyProfileToUI(profile) {
-  if (!profile) return;
-
-  // Home: avatar y saludo
-  const name = profile.name || 'Florista';
-  $('home-greeting-name').textContent = '¡Hola, ' + name.split(' ')[0] + '! 👋';
-
-  if (profile.logoDataUrl) {
-    const el = $('home-avatar');
-    el.innerHTML = '';
-    const img = document.createElement('img');
-    img.src = profile.logoDataUrl;
-    img.style.cssText = 'width:100%;height:100%;object-fit:cover;border-radius:50%;';
-    el.appendChild(img);
-  }
-
-  // Formulario de perfil (para edición)
-  if (profile.name)    $('biz-name').value    = profile.name;
-  if (profile.address) $('biz-address').value = profile.address;
-  if (profile.phone)   $('biz-phone').value   = profile.phone;
-  if (profile.email)   $('biz-email').value   = profile.email;
-
-  if (profile.logoDataUrl) {
-    $('logo-preview').src = profile.logoDataUrl;
-    $('logo-preview').style.display = 'block';
-    $('logo-placeholder').style.display = 'none';
-  }
-}
-
-// ── CATÁLOGO: guardar y leer desde localStorage ─
-function saveCatalog() {
-  localStorage.setItem('florical_flores',   JSON.stringify(state.flores));
-  localStorage.setItem('florical_mecanico', JSON.stringify(state.mecanico));
-}
-
-function loadCatalog() {
-  const f = localStorage.getItem('florical_flores');
-  const m = localStorage.getItem('florical_mecanico');
-  if (f) state.flores   = JSON.parse(f);
-  if (m) state.mecanico = JSON.parse(m);
-}
-
-function updateCatalogStats() {
-  $('stat-flores').textContent = state.flores.length;
-  $('stat-mec').textContent    = state.mecanico.length;
-
-  const hasData = state.flores.length > 0 || state.mecanico.length > 0;
-  if (hasData) {
-    $('import-zone-title').textContent = '↩ Actualizar catálogo';
-    $('import-zone-sub').textContent   = state.flores.length + ' flores · ' + state.mecanico.length + ' mecánicos cargados';
-    $('no-catalog-warning').style.display = 'none';
-  }
-}
-
-// ── IMPORT EXCEL ─────────────────────────────
-function parseExcel(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-
-    reader.onload = e => {
-      try {
-        const wb = XLSX.read(e.target.result, { type: 'array' });
-
-        // ── BD_Flores ──
-        const wsF = wb.Sheets['BD_Flores'];
-        const flores = [];
-        if (wsF) {
-          // sheet_to_json con header:1 devuelve arrays por fila
-          const rows = XLSX.utils.sheet_to_json(wsF, { header: 1 });
-          // Fila 0: título, 1: instrucciones, 2: headers → datos desde fila 3
-          for (let i = 3; i < rows.length; i++) {
-            const r = rows[i];
-            // Col 0: nombre, 1: proveedor, 2: tallos/paquete, 3: costo paquete,
-            // 4: costo/tallo, 5: factor, 6: precio c/factor, 7: IVA, 8: precio neto
-            if (r[0] && r[8]) {
-              flores.push({
-                nombre:        String(r[0]).trim(),
-                proveedor:     r[1] ? String(r[1]).trim() : '',
-                unidad:        'Tallo',
-                costoUnitario: parseFloat(r[4]) || 0,
-                precio:        parseFloat(r[8]) || 0
-              });
-            }
-          }
-        }
-
-        // ── BD_Mecanico ──
-        const wsM = wb.Sheets['BD_Mecanico'];
-        const mecanico = [];
-        if (wsM) {
-          const rows = XLSX.utils.sheet_to_json(wsM, { header: 1 });
-          // Col 0: nombre, 1: medida, 2: costo unitario, 3: factor,
-          // 4: precio c/factor, 5: IVA, 6: precio neto
-          for (let i = 3; i < rows.length; i++) {
-            const r = rows[i];
-            if (r[0] && r[6]) {
-              mecanico.push({
-                nombre:        String(r[0]).trim(),
-                unidad:        r[1] ? String(r[1]).trim() : 'pieza',
-                costoUnitario: parseFloat(r[2]) || 0,
-                precio:        parseFloat(r[6]) || 0
-              });
-            }
-          }
-        }
-
-        resolve({ flores, mecanico });
-      } catch (err) {
-        reject(err);
+// ── AUTH ──
+async function handleLogin() {
+  const code = document.getElementById('code-input').value.trim();
+  if (!code) { showToast('Ingresa tu codigo de acceso', 'error'); return; }
+  showLoading('Verificando acceso...');
+  try {
+    const data = await api('POST', '/api/auth/login', { code });
+    hideLoading();
+    if (!data.valid) {
+      if (data.suspended) {
+        showToast('Cuenta suspendida. Contacta al administrador.', 'error');
+      } else {
+        showToast('Codigo incorrecto', 'error');
       }
-    };
+      return;
+    }
+    state.token = data.token;
+    localStorage.setItem('fc_token', data.token);
+    if (!data.termsAccepted) {
+      openModal('modal-terms');
+    } else {
+      await initApp();
+    }
+  } catch(e) {
+    hideLoading();
+    showToast('Error de conexion', 'error');
+  }
+}
 
-    reader.onerror = () => reject(new Error('No se pudo leer el archivo'));
-    reader.readAsArrayBuffer(file);
+async function acceptTerms() {
+  showLoading('Guardando...');
+  await api('POST', '/api/auth/accept-terms');
+  hideLoading();
+  closeModal('modal-terms');
+  await initApp();
+}
+
+function logout() {
+  localStorage.removeItem('fc_token');
+  state.token = null;
+  state.profile = {};
+  state.catalog = { flores: [], mecanico: [] };
+  state.concepts = [];
+  state.quotes = [];
+  state.bankAccounts = [];
+  hide('app-shell');
+  show('view-login');
+  document.getElementById('code-input').value = '';
+}
+
+// ── INIT ──
+async function initApp() {
+  showLoading('Cargando tu cuenta...');
+  try {
+    const [profile, catalog, bankAccounts] = await Promise.all([
+      api('GET', '/api/profile'),
+      api('GET', '/api/catalog'),
+      api('GET', '/api/bank-accounts')
+    ]);
+    hideLoading();
+    state.profile = profile || {};
+    state.catalog = catalog || { flores: [], mecanico: [] };
+    state.bankAccounts = Array.isArray(bankAccounts) ? bankAccounts : [];
+
+    if (!state.profile.name) {
+      hide('view-login');
+      show('view-profile-setup');
+    } else {
+      hide('view-login');
+      show('app-shell');
+      renderProfileDisplay();
+      renderBankAccounts();
+      renderCatalog();
+      loadHistorial();
+    }
+  } catch(e) {
+    hideLoading();
+    showToast('Error al cargar datos', 'error');
+  }
+}
+
+async function checkExistingToken() {
+  const token = localStorage.getItem('fc_token');
+  if (!token) return;
+  state.token = token;
+  showLoading('');
+  try {
+    const profile = await api('GET', '/api/profile');
+    if (profile && !profile.error) {
+      state.profile = profile || {};
+      const [catalog, bankAccounts] = await Promise.all([
+        api('GET', '/api/catalog'),
+        api('GET', '/api/bank-accounts')
+      ]);
+      state.catalog = catalog || { flores: [], mecanico: [] };
+      state.bankAccounts = Array.isArray(bankAccounts) ? bankAccounts : [];
+      hideLoading();
+      hide('view-login');
+      show('app-shell');
+      renderProfileDisplay();
+      renderBankAccounts();
+      renderCatalog();
+      loadHistorial();
+    } else {
+      hideLoading();
+      localStorage.removeItem('fc_token');
+      state.token = null;
+    }
+  } catch(e) {
+    hideLoading();
+    localStorage.removeItem('fc_token');
+    state.token = null;
+  }
+}
+
+// ── PROFILE SETUP ──
+function handleLogoUpload(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    state.setupLogoDataUrl = e.target.result;
+    const el = document.getElementById('logo-preview');
+    el.innerHTML = '<img src="' + e.target.result + '" style="max-height:80px;max-width:100%;object-fit:contain;"/>';
+  };
+  reader.readAsDataURL(file);
+}
+
+function handleEditLogoUpload(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    state.editLogoDataUrl = e.target.result;
+    const el = document.getElementById('edit-logo-preview');
+    el.innerHTML = '<img src="' + e.target.result + '" style="max-height:80px;max-width:100%;object-fit:contain;"/>';
+  };
+  reader.readAsDataURL(file);
+}
+
+async function saveProfileSetup() {
+  const name = document.getElementById('setup-name').value.trim();
+  if (!name) { showToast('El nombre es requerido', 'error'); return; }
+  showLoading('Guardando perfil...');
+  const profileData = {
+    name,
+    phone: document.getElementById('setup-phone').value.trim(),
+    email: document.getElementById('setup-email').value.trim(),
+    address: document.getElementById('setup-address').value.trim(),
+    logo_data_url: state.setupLogoDataUrl || null
+  };
+  await api('PUT', '/api/profile', profileData);
+  state.profile = profileData;
+  hideLoading();
+  hide('view-profile-setup');
+  show('app-shell');
+  renderProfileDisplay();
+  renderBankAccounts();
+  renderCatalog();
+  loadHistorial();
+}
+
+// ── PROFILE EDIT ──
+function toggleEditProfile() {
+  const editDiv = document.getElementById('profile-edit');
+  const isHidden = editDiv.classList.contains('hidden');
+  if (isHidden) {
+    document.getElementById('edit-name').value = state.profile.name || '';
+    document.getElementById('edit-phone').value = state.profile.phone || '';
+    document.getElementById('edit-email').value = state.profile.email || '';
+    document.getElementById('edit-address').value = state.profile.address || '';
+    state.editLogoDataUrl = null;
+    const logoEl = document.getElementById('edit-logo-preview');
+    if (state.profile.logo_data_url) {
+      logoEl.innerHTML = '<img src="' + state.profile.logo_data_url + '" style="max-height:80px;max-width:100%;object-fit:contain;"/>';
+    } else {
+      logoEl.textContent = 'Toca para cambiar logo';
+    }
+    editDiv.classList.remove('hidden');
+  } else {
+    editDiv.classList.add('hidden');
+  }
+}
+
+function cancelEditProfile() {
+  document.getElementById('profile-edit').classList.add('hidden');
+}
+
+async function saveProfile() {
+  const name = document.getElementById('edit-name').value.trim();
+  if (!name) { showToast('El nombre es requerido', 'error'); return; }
+  showLoading('Guardando...');
+  const profileData = {
+    name,
+    phone: document.getElementById('edit-phone').value.trim(),
+    email: document.getElementById('edit-email').value.trim(),
+    address: document.getElementById('edit-address').value.trim(),
+    logo_data_url: state.editLogoDataUrl || state.profile.logo_data_url || null
+  };
+  await api('PUT', '/api/profile', profileData);
+  state.profile = profileData;
+  hideLoading();
+  cancelEditProfile();
+  renderProfileDisplay();
+  showToast('Perfil guardado', 'success');
+}
+
+function renderProfileDisplay() {
+  const p = state.profile;
+  const logoEl = document.getElementById('profile-logo-display');
+  const infoEl = document.getElementById('profile-info-display');
+  if (!logoEl || !infoEl) return;
+  if (p.logo_data_url) {
+    logoEl.innerHTML = '<img src="' + p.logo_data_url + '" class="profile-logo-img"/>';
+  } else {
+    logoEl.innerHTML = '<div class="logo-placeholder-sm">🌸</div>';
+  }
+  infoEl.innerHTML =
+    '<div class="profile-name">' + escHtml(p.name || '') + '</div>' +
+    (p.phone ? '<div class="profile-detail">' + escHtml(p.phone) + '</div>' : '') +
+    (p.email ? '<div class="profile-detail">' + escHtml(p.email) + '</div>' : '') +
+    (p.address ? '<div class="profile-detail">' + escHtml(p.address) + '</div>' : '');
+}
+
+// ── CATALOG ──
+function switchCatalogTab(btn) {
+  document.querySelectorAll('.cat-tab').forEach(function(b) { b.classList.remove('active'); });
+  btn.classList.add('active');
+  const type = btn.dataset.type;
+  document.getElementById('cat-flores').classList.toggle('hidden', type !== 'flores');
+  document.getElementById('cat-mecanico').classList.toggle('hidden', type !== 'mecanico');
+}
+
+function renderCatalog() {
+  renderCatalogSection('flores');
+  renderCatalogSection('mecanico');
+}
+
+function renderCatalogSection(type) {
+  const items = state.catalog[type] || [];
+  const el = document.getElementById(type + '-items');
+  if (!el) return;
+  el.innerHTML = items.map(function(item, i) {
+    return '<div class="catalog-item">' +
+      '<input type="text" class="cat-name" value="' + escHtml(item.name) + '" placeholder="Nombre" data-type="' + type + '" data-idx="' + i + '"/>' +
+      '<input type="number" class="cat-price" value="' + (item.price || 0) + '" placeholder="Precio" data-type="' + type + '" data-idx="' + i + '" min="0" step="0.01"/>' +
+      '<button class="cat-del" onclick="deleteCatalogItem(\'' + type + '\',' + i + ')">&#10005;</button>' +
+      '</div>';
+  }).join('');
+  el.querySelectorAll('.cat-name, .cat-price').forEach(function(input) {
+    input.addEventListener('change', function() { syncCatalogFromDOM(); });
   });
 }
 
-// ── CALCULADORA: tipo (Flor / Mecánico) ──────
-function setType(tipo) {
-  state.currentType    = tipo;
-  state.selectedItem   = null;
-  $('search-input').value = '';
-  $('price-display').textContent = '—';
-  $('qty-input').value = '';
-  closeAutocomplete();
-
-  $('type-flor').classList.toggle('active', tipo === 'Flor');
-  $('type-mec').classList.toggle('active',  tipo === 'Mecánico');
-}
-
-// ── AUTOCOMPLETE ─────────────────────────────
-function openAutocomplete(items) {
-  const list = $('autocomplete-list');
-  list.innerHTML = '';
-
-  if (items.length === 0) {
-    list.classList.remove('open');
-    return;
-  }
-
-  items.slice(0, 12).forEach(item => {
-    const div = document.createElement('div');
-    div.className = 'autocomplete-item';
-    div.innerHTML = `
-      <span class="ac-name">${item.nombre}</span>
-      <span class="ac-meta">${fmt(item.precio)} / ${item.unidad}</span>
-    `;
-    div.addEventListener('mousedown', e => {
-      e.preventDefault(); // evita blur antes de click
-      selectItem(item);
+function syncCatalogFromDOM() {
+  ['flores', 'mecanico'].forEach(function(type) {
+    const items = [];
+    const nameEls = document.querySelectorAll('[data-type="' + type + '"].cat-name');
+    nameEls.forEach(function(nameEl) {
+      const idx = nameEl.dataset.idx;
+      const priceEl = document.querySelector('[data-type="' + type + '"][data-idx="' + idx + '"].cat-price');
+      items.push({ name: nameEl.value, price: parseFloat(priceEl ? priceEl.value : 0) || 0 });
     });
-    list.appendChild(div);
+    state.catalog[type] = items;
   });
-
-  list.classList.add('open');
 }
 
-function closeAutocomplete() {
-  $('autocomplete-list').classList.remove('open');
+function addCatalogItem(type) {
+  if (!state.catalog[type]) state.catalog[type] = [];
+  state.catalog[type].push({ name: '', price: 0 });
+  renderCatalogSection(type);
 }
 
-function selectItem(item) {
-  state.selectedItem = item;
-  $('search-input').value       = item.nombre;
-  $('price-display').textContent = fmt(item.precio) + ' / ' + item.unidad;
-  $('qty-input').value           = '';
-  closeAutocomplete();
-  $('qty-input').focus();
+function deleteCatalogItem(type, idx) {
+  state.catalog[type].splice(idx, 1);
+  renderCatalogSection(type);
 }
 
-// ── ITEMS: agregar, eliminar, renderizar ──────
-function addItem() {
-  const item = state.selectedItem;
-  const qty  = parseFloat($('qty-input').value);
-
-  if (!item) { showToast('Selecciona un producto primero'); return; }
-  if (!qty || qty <= 0) { showToast('Ingresa una cantidad válida'); return; }
-
-  state.project.items.push({
-    tipo:          state.currentType,
-    nombre:        item.nombre,
-    unidad:        item.unidad,
-    cantidad:      qty,
-    precioUnitario: item.precio,
-    costoUnitario:  item.costoUnitario,
-    subtotal:       item.precio * qty
-  });
-
-  // Limpiar selección
-  state.selectedItem = null;
-  $('search-input').value        = '';
-  $('price-display').textContent = '—';
-  $('qty-input').value           = '';
-
-  renderItems();
-  updateTotals();
-  showToast('✓ ' + item.nombre + ' agregado');
+async function saveCatalog() {
+  syncCatalogFromDOM();
+  showLoading('Guardando catalogo...');
+  await api('PUT', '/api/catalog', state.catalog);
+  hideLoading();
+  showToast('Catalogo guardado', 'success');
 }
 
-function removeItem(idx) {
-  state.project.items.splice(idx, 1);
-  renderItems();
-  updateTotals();
+// ── QUOTE BUILDER ──
+function addConcept() {
+  state.concepts.push({ name: '', items: [] });
+  renderConcepts();
+  const idx = state.concepts.length - 1;
+  setTimeout(function() {
+    const inp = document.getElementById('concept-name-' + idx);
+    if (inp) inp.focus();
+  }, 50);
 }
 
-function renderItems() {
-  const list = $('items-list');
+function removeConcept(idx) {
+  state.concepts.splice(idx, 1);
+  renderConcepts();
+}
 
-  if (state.project.items.length === 0) {
-    list.innerHTML = `
-      <p class="text-center text-muted text-sm" style="padding:20px 0;">
-        Aún no hay ítems. Agrega flores y materiales arriba.
-      </p>`;
-    return;
+function updateConceptName(idx, val) {
+  if (state.concepts[idx]) state.concepts[idx].name = val;
+}
+
+function addItemToConcept(ci) {
+  if (!state.concepts[ci]) return;
+  state.concepts[ci].items.push({ name: '', cantidad: 1, costoUnitario: 0 });
+  renderConcepts();
+}
+
+function removeItemFromConcept(ci, ii) {
+  if (!state.concepts[ci]) return;
+  state.concepts[ci].items.splice(ii, 1);
+  renderConcepts();
+}
+
+function updateItemField(ci, ii, field, val) {
+  if (state.concepts[ci] && state.concepts[ci].items[ii]) {
+    state.concepts[ci].items[ii][field] = val;
+    updateTotals();
   }
+}
 
-  list.innerHTML = state.project.items.map((it, i) => `
-    <div class="item-row">
-      <div class="item-info">
-        <div class="item-name">${it.nombre}</div>
-        <div class="item-meta">
-          <span class="tag tag-${it.tipo === 'Flor' ? 'flor' : 'mecanico'}">${it.tipo}</span>
-          <span>${it.cantidad} ${it.unidad}</span>
-        </div>
-      </div>
-      <div class="item-price">${fmt(it.subtotal)}</div>
-      <button class="item-del" onclick="removeItem(${i})" title="Eliminar">×</button>
-    </div>
-  `).join('');
+function updateItemName(ci, ii, val) {
+  if (!state.concepts[ci] || !state.concepts[ci].items[ii]) return;
+  state.concepts[ci].items[ii].name = val;
+  const allItems = (state.catalog.flores || []).concat(state.catalog.mecanico || []);
+  const found = allItems.find(function(i) { return i.name.toLowerCase() === val.toLowerCase(); });
+  if (found && found.price) {
+    state.concepts[ci].items[ii].costoUnitario = found.price;
+    const priceEl = document.querySelector('#concept-items-' + ci + ' .concept-item:nth-child(' + (ii+1) + ') .item-price');
+    if (priceEl) { priceEl.value = found.price; }
+    updateTotals();
+  }
+}
+
+function showAutocomplete(ci, ii, query) {
+  const acEl = document.getElementById('ac-' + ci + '-' + ii);
+  if (!acEl) return;
+  if (!query || query.length < 1) { acEl.classList.add('hidden'); return; }
+  const allItems = (state.catalog.flores || []).concat(state.catalog.mecanico || []);
+  const matches = allItems.filter(function(i) {
+    return i.name.toLowerCase().includes(query.toLowerCase());
+  }).slice(0, 6);
+  if (!matches.length) { acEl.classList.add('hidden'); return; }
+  acEl.innerHTML = matches.map(function(m) {
+    return '<div class="ac-item" onmousedown="selectAutocomplete(' + ci + ',' + ii + ',\'' + escJs(m.name) + '\',' + (m.price || 0) + ')">' +
+      escHtml(m.name) + ' <span class="ac-price">' + formatCurrency(m.price) + '</span>' +
+      '</div>';
+  }).join('');
+  acEl.classList.remove('hidden');
+}
+
+function selectAutocomplete(ci, ii, name, price) {
+  if (!state.concepts[ci] || !state.concepts[ci].items[ii]) return;
+  state.concepts[ci].items[ii].name = name;
+  state.concepts[ci].items[ii].costoUnitario = price;
+  renderConcepts();
+}
+
+function hideAllAutocomplete() {
+  document.querySelectorAll('.autocomplete-list').forEach(function(el) {
+    el.classList.add('hidden');
+  });
+}
+
+function renderConcepts() {
+  const container = document.getElementById('concepts-list');
+  if (!container) return;
+  container.innerHTML = state.concepts.map(function(concept, ci) {
+    const conceptTotal = concept.items.reduce(function(s, i) { return s + (i.costoUnitario * i.cantidad); }, 0);
+    return '<div class="concept-card card">' +
+      '<div class="concept-header">' +
+        '<input type="text" id="concept-name-' + ci + '" class="concept-name-input" ' +
+          'value="' + escHtml(concept.name) + '" placeholder="Nombre del concepto (ej: Ramo de Novia)" ' +
+          'onchange="updateConceptName(' + ci + ', this.value)"/>' +
+        '<button class="btn-icon-sm" onclick="removeConcept(' + ci + ')">&#10005;</button>' +
+      '</div>' +
+      '<div class="concept-items" id="concept-items-' + ci + '">' +
+        concept.items.map(function(item, ii) {
+          return '<div class="concept-item">' +
+            '<div class="item-name-wrap">' +
+              '<input type="text" class="item-name" value="' + escHtml(item.name) + '" placeholder="Flor o material" ' +
+                'oninput="showAutocomplete(' + ci + ',' + ii + ',this.value)" ' +
+                'onblur="setTimeout(hideAllAutocomplete,150)" ' +
+                'onchange="updateItemName(' + ci + ',' + ii + ',this.value)" ' +
+                'id="item-name-' + ci + '-' + ii + '"/>' +
+              '<div class="autocomplete-list hidden" id="ac-' + ci + '-' + ii + '"></div>' +
+            '</div>' +
+            '<input type="number" class="item-qty" value="' + item.cantidad + '" placeholder="Cant." min="1" ' +
+              'onchange="updateItemField(' + ci + ',' + ii + ',\'cantidad\',parseFloat(this.value)||1)"/>' +
+            '<input type="number" class="item-price" value="' + item.costoUnitario + '" placeholder="Precio" min="0" step="0.01" ' +
+              'onchange="updateItemField(' + ci + ',' + ii + ',\'costoUnitario\',parseFloat(this.value)||0)"/>' +
+            '<button class="btn-icon-sm" onclick="removeItemFromConcept(' + ci + ',' + ii + ')">&#10005;</button>' +
+          '</div>';
+        }).join('') +
+      '</div>' +
+      '<button class="btn-text btn-add-item" onclick="addItemToConcept(' + ci + ')">+ Agregar material</button>' +
+      '<div class="concept-subtotal">Subtotal: ' + formatCurrency(conceptTotal) + '</div>' +
+    '</div>';
+  }).join('');
+  updateTotals();
+  if (state.concepts.length > 0) {
+    document.getElementById('totals-preview').style.display = 'block';
+  }
 }
 
 function updateTotals() {
-  const items = state.project.items;
-  const hasItems = items.length > 0;
+  const shipping = parseFloat(document.getElementById('q-shipping') ? document.getElementById('q-shipping').value : 0) || 0;
+  const rawTotal = state.concepts.reduce(function(s, c) {
+    return s + c.items.reduce(function(cs, i) { return cs + (i.costoUnitario * i.cantidad); }, 0);
+  }, 0);
+  const subtotal = rawTotal / 1.16;
+  const iva = rawTotal - subtotal;
+  const total = rawTotal + shipping;
 
-  $('totals-card').style.display           = hasItems ? 'block' : 'none';
-  $('btn-ver-cotizacion').classList.toggle('hidden', !hasItems);
+  const tSub = document.getElementById('t-subtotal');
+  const tIva = document.getElementById('t-iva');
+  const tTotal = document.getElementById('t-total');
+  const tShip = document.getElementById('t-ship');
+  const tShipRow = document.getElementById('t-ship-row');
+  const noDelivery = document.getElementById('no-delivery-note');
 
-  if (!hasItems) return;
+  if (tSub) tSub.textContent = formatCurrency(subtotal);
+  if (tIva) tIva.textContent = formatCurrency(iva);
+  if (tTotal) tTotal.textContent = formatCurrency(total);
 
-  const flores   = items.filter(i => i.tipo === 'Flor');
-  const mecanico = items.filter(i => i.tipo === 'Mecánico');
-
-  const tFlores   = flores.reduce((s, i) => s + i.subtotal, 0);
-  const tMecanico = mecanico.reduce((s, i) => s + i.subtotal, 0);
-  const total     = tFlores + tMecanico;
-  const costoBase = items.reduce((s, i) => s + i.costoUnitario * i.cantidad, 0);
-  const utilidad  = total - costoBase;
-
-  $('total-flores').textContent  = fmt(tFlores);
-  $('total-mecanico').textContent = fmt(tMecanico);
-  $('total-general').textContent  = fmt(total);
-  $('costo-base').textContent    = fmt(costoBase);
-  $('utilidad').textContent       = fmt(utilidad);
-}
-
-// ── COTIZACIÓN: renderizar vista ──────────────
-function renderQuote() {
-  const profile = state.profile || {};
-  const project = state.project;
-  const items   = project.items;
-
-  // Número y fecha
-  $('q-number').textContent = quoteNumber();
-  $('q-date').textContent   = new Date().toLocaleDateString('es-MX', {
-    day: '2-digit', month: 'long', year: 'numeric'
-  });
-
-  // Datos del negocio
-  $('q-biz-name').textContent = profile.name || 'Mi Florería';
-
-  const metaParts = [profile.address, profile.phone, profile.email].filter(Boolean);
-  $('q-biz-meta').textContent = metaParts.join(' · ');
-
-  // Logo
-  if (profile.logoDataUrl) {
-    $('q-logo-img').src = profile.logoDataUrl;
-    $('q-logo-img').style.display    = 'block';
-    $('q-logo-placeholder').style.display = 'none';
+  if (shipping > 0) {
+    if (tShip) tShip.textContent = formatCurrency(shipping);
+    if (tShipRow) tShipRow.style.display = 'flex';
+    if (noDelivery) noDelivery.style.display = 'none';
   } else {
-    $('q-logo-img').style.display         = 'none';
-    $('q-logo-placeholder').style.display = 'flex';
+    if (tShipRow) tShipRow.style.display = 'none';
+    if (noDelivery) noDelivery.style.display = 'block';
   }
 
-  // Cliente y proyecto
-  $('q-client').textContent  = project.cliente || '—';
-  $('q-project').textContent = project.nombre  || '—';
-
-  // Ítems
-  $('q-items-list').innerHTML = items.map(it => `
-    <div class="quote-item-row">
-      <div>
-        <div class="q-name">${it.nombre}</div>
-        <div style="font-size:11px;color:var(--text-2);">
-          <span class="tag tag-${it.tipo === 'Flor' ? 'flor' : 'mecanico'}">${it.tipo}</span>
-        </div>
-      </div>
-      <div class="q-right">${it.cantidad} ${it.unidad}</div>
-      <div class="q-right">${fmt(it.precioUnitario)}</div>
-      <div class="q-total">${fmt(it.subtotal)}</div>
-    </div>
-  `).join('');
-
-  // Totales
-  const tFlores   = items.filter(i => i.tipo === 'Flor').reduce((s, i) => s + i.subtotal, 0);
-  const tMecanico = items.filter(i => i.tipo === 'Mecánico').reduce((s, i) => s + i.subtotal, 0);
-  const total     = tFlores + tMecanico;
-
-  $('q-total-flores').textContent = fmt(tFlores);
-  $('q-total-mec').textContent    = fmt(tMecanico);
-  $('q-grand-total').textContent  = fmt(total);
-
-  // Footer
-  const contactParts = [profile.phone, profile.email].filter(Boolean);
-  $('q-footer-contact').textContent = contactParts.join(' · ');
+  if (rawTotal > 0) {
+    const tp = document.getElementById('totals-preview');
+    if (tp) tp.style.display = 'block';
+  }
 }
 
-// ── PDF: generar y descargar ─────────────────
-async function downloadPDF() {
+async function saveQuote() {
+  const client = (document.getElementById('q-client').value || '').trim();
+  const project = (document.getElementById('q-project').value || '').trim();
+  const date = document.getElementById('q-date').value;
+  if (!client || !project) { showToast('Cliente y proyecto son requeridos', 'error'); return; }
+  if (state.concepts.length === 0) { showToast('Agrega al menos un concepto', 'error'); return; }
+
+  const shipping = parseFloat(document.getElementById('q-shipping').value) || 0;
+  const rawTotal = state.concepts.reduce(function(s, c) {
+    return s + c.items.reduce(function(cs, i) { return cs + (i.costoUnitario * i.cantidad); }, 0);
+  }, 0);
+  const subtotal = rawTotal / 1.16;
+  const iva = rawTotal - subtotal;
+  const total = rawTotal + shipping;
+  const quoteNumber = 'COT-' + Date.now().toString().slice(-6);
+
+  showLoading('Guardando cotizacion...');
+  const res = await api('POST', '/api/quotes', {
+    quote_number: quoteNumber,
+    client_name: client,
+    project_name: project,
+    date: date || new Date().toISOString().split('T')[0],
+    concepts: state.concepts,
+    shipping: shipping,
+    subtotal: subtotal.toFixed(2),
+    iva: iva.toFixed(2),
+    total: total.toFixed(2),
+    notes: (document.getElementById('q-notes').value || '').trim()
+  });
+  hideLoading();
+  if (res.id) {
+    showToast('Cotizacion guardada', 'success');
+    resetQuote();
+    await loadHistorial();
+    switchView('historial', document.querySelector('[data-view="historial"]'));
+  } else {
+    showToast('Error al guardar', 'error');
+  }
+}
+
+function resetQuote() {
+  state.concepts = [];
+  ['q-client','q-project','q-date','q-shipping','q-notes'].forEach(function(id) {
+    const el = document.getElementById(id);
+    if (el) el.value = '';
+  });
+  const cl = document.getElementById('concepts-list');
+  if (cl) cl.innerHTML = '';
+  const tp = document.getElementById('totals-preview');
+  if (tp) tp.style.display = 'none';
+}
+
+// ── HISTORIAL ──
+let currentFilter = 'all';
+
+async function loadHistorial() {
+  try {
+    const url = currentFilter !== 'all' ? '/api/quotes?status=' + currentFilter : '/api/quotes';
+    const quotes = await api('GET', url);
+    state.quotes = Array.isArray(quotes) ? quotes : [];
+    renderQuotesList();
+  } catch(e) { console.error(e); }
+}
+
+function filterQuotes(btn) {
+  document.querySelectorAll('.pill').forEach(function(p) { p.classList.remove('active'); });
+  btn.classList.add('active');
+  currentFilter = btn.dataset.status;
+  loadHistorial();
+}
+
+function renderQuotesList() {
+  const el = document.getElementById('quotes-list');
+  if (!el) return;
+  if (!state.quotes.length) {
+    el.innerHTML = '<div class="empty-state">No hay cotizaciones aun</div>';
+    return;
+  }
+  const sLabels = { pending: 'Pendiente', accepted: 'Aceptada', paid: 'Pagada', cancelled: 'Cancelada' };
+  const sColors = { pending: 'yellow', accepted: 'blue', paid: 'green', cancelled: 'red' };
+  el.innerHTML = state.quotes.map(function(q) {
+    return '<div class="quote-card" onclick="openQuoteDetail(' + q.id + ')">' +
+      '<div class="quote-card-header">' +
+        '<span class="quote-number">' + escHtml(q.quote_number) + '</span>' +
+        '<span class="status-chip ' + (sColors[q.status] || '') + '">' + (sLabels[q.status] || q.status) + '</span>' +
+      '</div>' +
+      '<div class="quote-client">' + escHtml(q.client_name) + '</div>' +
+      '<div class="quote-project">' + escHtml(q.project_name) + '</div>' +
+      '<div class="quote-footer">' +
+        '<span class="quote-date">' + (q.date ? formatDate(q.date) : '') + '</span>' +
+        '<span class="quote-total">' + formatCurrency(q.total) + '</span>' +
+      '</div>' +
+    '</div>';
+  }).join('');
+}
+
+// ── QUOTE DETAIL ──
+async function openQuoteDetail(id) {
+  showLoading('Cargando cotizacion...');
+  const quote = await api('GET', '/api/quotes/' + id);
+  hideLoading();
+  if (!quote || !quote.id) { showToast('Error al cargar cotizacion', 'error'); return; }
+  state.currentQuote = quote;
+  state.currentQuoteId = id;
+
+  const sLabels = { pending: 'Pendiente', accepted: 'Aceptada', paid: 'Pagada', cancelled: 'Cancelada' };
+  const sColors = { pending: 'yellow', accepted: 'blue', paid: 'green', cancelled: 'red' };
+  const concepts = Array.isArray(quote.concepts) ? quote.concepts : [];
+  const shipping = parseFloat(quote.shipping) || 0;
+
+  let paymentHtml = '';
+  if (quote.payment_info) {
+    const pi = typeof quote.payment_info === 'string' ? JSON.parse(quote.payment_info) : quote.payment_info;
+    if (pi && pi.bankName) {
+      const remaining = parseFloat(quote.total) - (pi.anticipo || 0);
+      paymentHtml = '<div class="card payment-card">' +
+        '<h4>Informacion de pago</h4>' +
+        '<div class="pay-detail-row"><span>Banco:</span><span>' + escHtml(pi.bankName) + '</span></div>' +
+        (pi.anticipo > 0 ? '<div class="pay-detail-row"><span>Anticipo:</span><span>' + formatCurrency(pi.anticipo) + '</span></div>' : '') +
+        (pi.anticipo > 0 ? '<div class="pay-detail-row"><span>Restante:</span><span>' + formatCurrency(remaining) + '</span></div>' : '') +
+        '</div>';
+    }
+  }
+
+  const conceptsHtml = concepts.map(function(c) {
+    const cTotal = (c.items || []).reduce(function(s, i) { return s + (i.costoUnitario * i.cantidad); }, 0);
+    return '<div class="card concept-detail-card">' +
+      '<div class="concept-detail-name">' + escHtml(c.name) + '</div>' +
+      '<ul class="concept-detail-items">' +
+        (c.items || []).map(function(i) {
+          return '<li>' + escHtml(i.name) + ' x' + i.cantidad + ' &mdash; ' + formatCurrency(i.costoUnitario * i.cantidad) + '</li>';
+        }).join('') +
+      '</ul>' +
+      '<div class="concept-detail-total">Total: ' + formatCurrency(cTotal) + '</div>' +
+    '</div>';
+  }).join('');
+
+  const detailEl = document.getElementById('detail-content');
+  detailEl.innerHTML =
+    '<div class="detail-meta card">' +
+      '<div class="detail-row"><span>Cliente:</span><strong>' + escHtml(quote.client_name) + '</strong></div>' +
+      '<div class="detail-row"><span>Proyecto:</span><strong>' + escHtml(quote.project_name) + '</strong></div>' +
+      '<div class="detail-row"><span>Fecha:</span><span>' + (quote.date ? formatDate(quote.date) : '') + '</span></div>' +
+      '<div class="detail-row"><span>Estado:</span><span class="status-chip ' + (sColors[quote.status] || '') + '">' + (sLabels[quote.status] || quote.status) + '</span></div>' +
+    '</div>' +
+    '<div class="concepts-detail">' + conceptsHtml + '</div>' +
+    '<div class="card totals-card">' +
+      '<div class="totals-row"><span>Subtotal (sin IVA)</span><span>' + formatCurrency(quote.subtotal) + '</span></div>' +
+      '<div class="totals-row"><span>IVA 16%</span><span>' + formatCurrency(quote.iva) + '</span></div>' +
+      (shipping > 0 ? '<div class="totals-row"><span>Envio</span><span>' + formatCurrency(shipping) + '</span></div>' : '') +
+      '<div class="totals-row totals-total"><span>Total</span><span>' + formatCurrency(quote.total) + '</span></div>' +
+      (shipping === 0 ? '<div class="no-delivery-note">Este costo no incluye entrega</div>' : '') +
+    '</div>' +
+    (quote.notes ? '<div class="card"><p class="quote-notes">' + escHtml(quote.notes) + '</p></div>' : '') +
+    paymentHtml +
+    renderStatusActions(quote);
+
+  document.getElementById('detail-quote-number').textContent = quote.quote_number;
+  state.prevView = state.currentView;
+  showView('view-quote-detail');
+  hide('bottom-nav');
+}
+
+function renderStatusActions(quote) {
+  if (quote.status === 'pending') {
+    return '<div class="action-row">' +
+      '<button class="btn-outline" onclick="openPaymentModal(\'accepted\')">Marcar Aceptada</button>' +
+      '<button class="btn-danger" onclick="updateQuoteStatus(\'cancelled\')">Cancelar</button>' +
+    '</div>';
+  }
+  if (quote.status === 'accepted') {
+    return '<div class="action-row">' +
+      '<button class="btn-primary" onclick="openPaymentModal(\'paid\')">Marcar Pagada</button>' +
+      '<button class="btn-danger" onclick="updateQuoteStatus(\'cancelled\')">Cancelar</button>' +
+    '</div>';
+  }
+  if (quote.status === 'paid') {
+    return '<div class="status-final paid-final">Pagada completamente</div>';
+  }
+  if (quote.status === 'cancelled') {
+    return '<div class="status-final cancelled-final">Cancelada</div>';
+  }
+  return '';
+}
+
+function goBack() {
+  showView('view-' + (state.prevView || 'historial'));
+  show('bottom-nav');
+  if (state.prevView === 'historial') loadHistorial();
+}
+
+// ── PAYMENT ──
+function openPaymentModal(targetStatus) {
+  const bankSel = document.getElementById('pay-bank');
+  bankSel.innerHTML = state.bankAccounts.length
+    ? state.bankAccounts.map(function(b) {
+        return '<option value="' + b.id + '">' + escHtml(b.name) + '</option>';
+      }).join('')
+    : '<option value="">Sin cuentas configuradas</option>';
+
+  document.getElementById('pay-status').value = targetStatus;
+  document.getElementById('pay-anticipo').value = '';
+  const total = parseFloat(state.currentQuote ? state.currentQuote.total : 0) || 0;
+  document.getElementById('pay-remaining').textContent = formatCurrency(total);
+  document.getElementById('pay-anticipo').oninput = function() {
+    const ant = parseFloat(this.value) || 0;
+    document.getElementById('pay-remaining').textContent = formatCurrency(Math.max(0, total - ant));
+  };
+  openModal('modal-payment');
+}
+
+async function savePayment() {
+  const status = document.getElementById('pay-status').value;
+  const bankSel = document.getElementById('pay-bank');
+  const bankName = bankSel.options[bankSel.selectedIndex] ? bankSel.options[bankSel.selectedIndex].text : '';
+  const anticipo = parseFloat(document.getElementById('pay-anticipo').value) || 0;
+  showLoading('Guardando...');
+  await api('PUT', '/api/quotes/' + state.currentQuoteId, {
+    status: status,
+    payment_info: { bankName: bankName, anticipo: anticipo }
+  });
+  hideLoading();
+  closeModal('modal-payment');
+  showToast('Estado actualizado', 'success');
+  await openQuoteDetail(state.currentQuoteId);
+}
+
+async function updateQuoteStatus(status) {
+  const labels = { cancelled: 'cancelar', pending: 'pendiente', accepted: 'aceptada', paid: 'pagada' };
+  if (!confirm('Cambiar estado a ' + (labels[status] || status) + '?')) return;
+  showLoading('Actualizando...');
+  await api('PUT', '/api/quotes/' + state.currentQuoteId, { status: status, payment_info: null });
+  hideLoading();
+  showToast('Estado actualizado', 'success');
+  await openQuoteDetail(state.currentQuoteId);
+}
+
+// ── BANK ACCOUNTS ──
+function renderBankAccounts() {
+  const el = document.getElementById('bank-accounts-list');
+  if (!el) return;
+  if (!state.bankAccounts.length) {
+    el.innerHTML = '<div class="empty-state">No hay cuentas configuradas</div>';
+    return;
+  }
+  el.innerHTML = state.bankAccounts.map(function(b) {
+    return '<div class="bank-item">' +
+      '<div class="bank-info">' +
+        '<div class="bank-name">' + escHtml(b.name) + (b.is_default ? ' <span class="default-badge">Predeterminada</span>' : '') + '</div>' +
+        '<div class="bank-details">' + escHtml(b.details || '') + '</div>' +
+      '</div>' +
+      '<div class="bank-actions">' +
+        '<button class="btn-text" onclick="editBank(' + b.id + ')">Editar</button>' +
+        '<button class="btn-text danger" onclick="deleteBank(' + b.id + ')">Eliminar</button>' +
+      '</div>' +
+    '</div>';
+  }).join('');
+}
+
+function openAddBank() {
+  state.editingBankId = null;
+  document.getElementById('bank-modal-title').textContent = 'Nueva Cuenta Bancaria';
+  document.getElementById('bank-name').value = '';
+  document.getElementById('bank-details').value = '';
+  document.getElementById('bank-default').checked = false;
+  openModal('modal-bank');
+}
+
+function editBank(id) {
+  const bank = state.bankAccounts.find(function(b) { return b.id === id; });
+  if (!bank) return;
+  state.editingBankId = id;
+  document.getElementById('bank-modal-title').textContent = 'Editar Cuenta Bancaria';
+  document.getElementById('bank-name').value = bank.name || '';
+  document.getElementById('bank-details').value = bank.details || '';
+  document.getElementById('bank-default').checked = bank.is_default || false;
+  openModal('modal-bank');
+}
+
+async function saveBank() {
+  const name = (document.getElementById('bank-name').value || '').trim();
+  if (!name) { showToast('El nombre es requerido', 'error'); return; }
+  const details = (document.getElementById('bank-details').value || '').trim();
+  const is_default = document.getElementById('bank-default').checked;
+  showLoading('Guardando...');
+  if (state.editingBankId) {
+    await api('PUT', '/api/bank-accounts/' + state.editingBankId, { name: name, details: details, is_default: is_default });
+  } else {
+    await api('POST', '/api/bank-accounts', { name: name, details: details, is_default: is_default });
+  }
+  const accounts = await api('GET', '/api/bank-accounts');
+  state.bankAccounts = Array.isArray(accounts) ? accounts : [];
+  hideLoading();
+  closeModal('modal-bank');
+  renderBankAccounts();
+  showToast('Cuenta guardada', 'success');
+}
+
+async function deleteBank(id) {
+  if (!confirm('Eliminar esta cuenta bancaria?')) return;
+  showLoading('Eliminando...');
+  await api('DELETE', '/api/bank-accounts/' + id);
+  const accounts = await api('GET', '/api/bank-accounts');
+  state.bankAccounts = Array.isArray(accounts) ? accounts : [];
+  hideLoading();
+  renderBankAccounts();
+  showToast('Cuenta eliminada', 'success');
+}
+
+// ── WHATSAPP ──
+function shareWhatsApp() {
+  if (!state.currentQuote) return;
+  const q = state.currentQuote;
+  document.getElementById('wa-greeting').value = 'Hola ' + (q.client_name || '') + ',';
+  document.getElementById('wa-note').value = 'Con gusto te comparto la cotizacion para tu proyecto.';
+  document.getElementById('wa-signature').value = state.profile.name || '';
+  updateWAPreview();
+  openModal('modal-whatsapp');
+}
+
+function updateWAPreview() {
+  if (!state.currentQuote) return;
+  const q = state.currentQuote;
+  const concepts = Array.isArray(q.concepts) ? q.concepts : [];
+  const shipping = parseFloat(q.shipping) || 0;
+  const greeting = document.getElementById('wa-greeting').value;
+  const note = document.getElementById('wa-note').value;
+  const sig = document.getElementById('wa-signature').value;
+
+  var msg = '';
+  if (greeting) msg += greeting + '\n\n';
+  if (note) msg += note + '\n\n';
+  msg += '--- ' + (q.project_name || '') + ' ---\n\n';
+  concepts.forEach(function(c) {
+    msg += (c.name || 'Concepto') + '\n';
+    (c.items || []).forEach(function(i) {
+      msg += '  - ' + i.name + ' x' + i.cantidad + '\n';
+    });
+    var cTotal = (c.items || []).reduce(function(s, i) { return s + (i.costoUnitario * i.cantidad); }, 0);
+    msg += '  Total: ' + formatCurrencyPlain(cTotal) + '\n\n';
+  });
+  msg += 'Subtotal: ' + formatCurrencyPlain(q.subtotal) + '\n';
+  msg += 'IVA 16%: ' + formatCurrencyPlain(q.iva) + '\n';
+  if (shipping > 0) msg += 'Envio: ' + formatCurrencyPlain(shipping) + '\n';
+  msg += 'TOTAL: ' + formatCurrencyPlain(q.total) + '\n';
+  if (shipping === 0) msg += '\n(Este costo no incluye entrega)\n';
+  if (sig) msg += '\n' + sig;
+
+  document.getElementById('wa-preview').textContent = msg;
+}
+
+function sendWhatsApp() {
+  const text = document.getElementById('wa-preview').textContent;
+  window.open('https://wa.me/?text=' + encodeURIComponent(text), '_blank');
+  closeModal('modal-whatsapp');
+}
+
+// ── PDF ──
+async function generatePDF() {
+  if (!state.currentQuote) return;
+  const q = state.currentQuote;
+  const p = state.profile;
+  const concepts = Array.isArray(q.concepts) ? q.concepts : [];
+  const shipping = parseFloat(q.shipping) || 0;
+  const docEl = document.getElementById('detail-quote-doc');
+  docEl.className = 'pdf-render';
+
+  var conceptsHtml = concepts.map(function(c) {
+    var cTotal = (c.items || []).reduce(function(s, i) { return s + (i.costoUnitario * i.cantidad); }, 0);
+    return '<div class="pdf-concept">' +
+      '<div class="pdf-concept-name">' + escHtml(c.name) + '</div>' +
+      (c.items || []).map(function(i) {
+        return '<div class="pdf-item">' +
+          '<span>' + escHtml(i.name) + '</span>' +
+          '<span>x' + i.cantidad + '</span>' +
+          '<span>' + formatCurrencyPlain(i.costoUnitario * i.cantidad) + '</span>' +
+        '</div>';
+      }).join('') +
+      '<div class="pdf-concept-total">Total: ' + formatCurrencyPlain(cTotal) + '</div>' +
+    '</div>';
+  }).join('');
+
+  docEl.innerHTML =
+    '<div class="pdf-header">' +
+      (p.logo_data_url ? '<img src="' + p.logo_data_url + '" class="pdf-logo"/>' : '') +
+      '<div class="pdf-business">' +
+        '<div class="pdf-business-name">' + escHtml(p.name || '') + '</div>' +
+        (p.phone ? '<div class="pdf-contact">' + escHtml(p.phone) + '</div>' : '') +
+        (p.email ? '<div class="pdf-contact">' + escHtml(p.email) + '</div>' : '') +
+        (p.address ? '<div class="pdf-contact">' + escHtml(p.address) + '</div>' : '') +
+      '</div>' +
+      '<div class="pdf-quote-info">' +
+        '<div class="pdf-quote-num">' + escHtml(q.quote_number) + '</div>' +
+        '<div class="pdf-quote-date">' + (q.date ? formatDate(q.date) : '') + '</div>' +
+      '</div>' +
+    '</div>' +
+    '<div class="pdf-client">' +
+      '<div class="pdf-label">Para:</div>' +
+      '<div class="pdf-client-name">' + escHtml(q.client_name) + '</div>' +
+      '<div class="pdf-project">' + escHtml(q.project_name) + '</div>' +
+    '</div>' +
+    '<div class="pdf-concepts">' + conceptsHtml + '</div>' +
+    '<div class="pdf-totals">' +
+      '<div class="pdf-total-row"><span>Subtotal (sin IVA)</span><span>' + formatCurrencyPlain(q.subtotal) + '</span></div>' +
+      '<div class="pdf-total-row"><span>IVA 16%</span><span>' + formatCurrencyPlain(q.iva) + '</span></div>' +
+      (shipping > 0 ? '<div class="pdf-total-row"><span>Envio</span><span>' + formatCurrencyPlain(shipping) + '</span></div>' : '') +
+      '<div class="pdf-total-row pdf-total-final"><span>TOTAL</span><span>' + formatCurrencyPlain(q.total) + '</span></div>' +
+      (shipping === 0 ? '<div class="pdf-no-delivery">Este costo no incluye entrega</div>' : '') +
+    '</div>' +
+    (q.notes ? '<div class="pdf-notes">' + escHtml(q.notes) + '</div>' : '');
+
   showLoading('Generando PDF...');
   try {
-    const doc = $('quote-doc');
-
-    // html2canvas captura el div de cotización
-    const canvas = await html2canvas(doc, {
-      scale:           2,      // alta resolución
-      useCORS:         true,
-      backgroundColor: '#ffffff',
-      logging:         false
-    });
-
+    const canvas = await html2canvas(docEl, { scale: 2, backgroundColor: '#ffffff', logging: false });
     const imgData = canvas.toDataURL('image/png');
-    const { jsPDF } = window.jspdf;
-    const pdf = new jsPDF({
-      orientation: 'portrait',
-      unit:        'px',
-      format:      [canvas.width / 2, canvas.height / 2]
-    });
+    const jsPDFLib = window.jspdf && window.jspdf.jsPDF ? window.jspdf.jsPDF : (window.jsPDF || null);
+    if (!jsPDFLib) { showToast('Error: libreria PDF no disponible', 'error'); hideLoading(); return; }
+    const pdf = new jsPDFLib({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+    const pdfW = pdf.internal.pageSize.getWidth();
+    const imgHeight = (canvas.height * pdfW) / canvas.width;
+    var y = 0;
+    var pageHeight = pdf.internal.pageSize.getHeight();
+    while (y < imgHeight) {
+      if (y > 0) pdf.addPage();
+      pdf.addImage(imgData, 'PNG', 0, -y, pdfW, imgHeight);
+      y += pageHeight;
+    }
+    pdf.save((q.quote_number || 'cotizacion') + '.pdf');
+  } catch(e) {
+    showToast('Error al generar PDF', 'error');
+    console.error(e);
+  }
+  hideLoading();
+  docEl.className = 'hidden-print';
+  docEl.innerHTML = '';
+}
 
-    pdf.addImage(imgData, 'PNG', 0, 0, canvas.width / 2, canvas.height / 2);
+// ── REPORTS ──
+async function downloadReport() {
+  const from = document.getElementById('rep-from').value;
+  const to = document.getElementById('rep-to').value;
+  var url = '/api/reports/excel';
+  var params = [];
+  if (from) params.push('from=' + from);
+  if (to) params.push('to=' + to);
+  if (params.length) url += '?' + params.join('&');
+  showLoading('Generando reporte...');
+  try {
+    const res = await fetch(url, { headers: { 'Authorization': 'Bearer ' + state.token } });
+    if (!res.ok) throw new Error('Error');
+    const blob = await res.blob();
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = 'FloriCalc_Reporte.xlsx';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(link.href);
+    showToast('Reporte descargado', 'success');
+  } catch(e) {
+    showToast('Error al descargar reporte', 'error');
+  }
+  hideLoading();
+}
 
-    const clienteName = state.project.cliente
-      ? state.project.cliente.replace(/\s+/g, '_')
-      : 'cotizacion';
-    pdf.save('FloriCalc_' + clienteName + '.pdf');
-
-    showToast('✓ PDF descargado');
-  } catch (err) {
-    console.error(err);
-    showToast('Error generando PDF. Intenta de nuevo.');
-  } finally {
-    hideLoading();
+// ── NAVIGATION ──
+function switchView(viewName, btn) {
+  if (btn) {
+    document.querySelectorAll('.nav-item').forEach(function(n) { n.classList.remove('active'); });
+    btn.classList.add('active');
+  }
+  state.currentView = viewName;
+  showView('view-' + viewName);
+  show('bottom-nav');
+  if (viewName === 'historial') loadHistorial();
+  if (viewName === 'cuenta') {
+    renderProfileDisplay();
+    renderBankAccounts();
+    renderCatalog();
   }
 }
 
-// ── WHATSAPP: compartir con enlace ───────────
-function shareWhatsApp() {
-  const total    = state.project.items.reduce((s, i) => s + i.subtotal, 0);
-  const cliente  = state.project.cliente || 'cliente';
-  const proyecto = state.project.nombre  || 'tu proyecto';
-  const biz      = state.profile?.name   || 'FloriCalc';
-
-  const msg = encodeURIComponent(
-    `Hola ${cliente} 🌸\n\n` +
-    `Te comparto la cotización de *${proyecto}*:\n\n` +
-    `💐 Flores + Mecánico\n` +
-    `*Total: ${fmt(total)}* (IVA incluido)\n\n` +
-    `Con cariño,\n${biz}`
-  );
-
-  window.open('https://wa.me/?text=' + msg, '_blank');
+function showView(viewId) {
+  document.querySelectorAll('.view').forEach(function(v) {
+    v.classList.add('hidden');
+    v.classList.remove('active');
+  });
+  const target = document.getElementById(viewId);
+  if (target) {
+    target.classList.remove('hidden');
+    target.classList.add('active');
+  }
 }
 
-// ── INIT: arrancar la app ────────────────────
-function init() {
-  // Cargar datos guardados
-  const profile = loadProfile();
-  loadCatalog();
-  updateCatalogStats();
-
-  if (profile) {
-    state.profile = profile;
-    applyProfileToUI(profile);
-    showView('view-home');
-  } else {
-    showView('view-login');
+// ── DOMContentLoaded ──
+document.addEventListener('DOMContentLoaded', function() {
+  var codeInput = document.getElementById('code-input');
+  if (codeInput) {
+    codeInput.addEventListener('keydown', function(e) { if (e.key === 'Enter') handleLogin(); });
   }
 
-  // Fecha de hoy por defecto
-  const today = new Date().toISOString().split('T')[0];
-  $('proj-fecha').value = today;
-
-  bindEvents();
-}
-
-// ── EVENTOS ──────────────────────────────────
-function bindEvents() {
-
-  // LOGIN
-  $('btn-login').addEventListener('click', async () => {
-    const code = $('code-input').value.trim();
-    if (!code) { showToast('Escribe tu código de acceso'); return; }
-
-    showLoading('Verificando...');
-    const valid = await verifyCode(code);
-    hideLoading();
-
-    if (valid) {
-      localStorage.setItem('florical_auth', '1');
-      $('login-error').classList.remove('show');
-
-      const profile = loadProfile();
-      if (profile) {
-        state.profile = profile;
-        applyProfileToUI(profile);
-        showView('view-home');
-      } else {
-        showView('view-profile');
-      }
-    } else {
-      $('login-error').classList.add('show');
-      $('code-input').focus();
-    }
+  ['wa-greeting','wa-note','wa-signature'].forEach(function(id) {
+    var el = document.getElementById(id);
+    if (el) el.addEventListener('input', function() { if (state.currentQuote) updateWAPreview(); });
   });
 
-  // LOGIN: permitir Enter
-  $('code-input').addEventListener('keydown', e => {
-    if (e.key === 'Enter') $('btn-login').click();
-  });
+  var shipInput = document.getElementById('q-shipping');
+  if (shipInput) shipInput.addEventListener('input', updateTotals);
 
-  // PERFIL: logo upload
-  $('logo-file').addEventListener('change', e => {
-    const file = e.target.files[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = ev => {
-      const dataUrl = ev.target.result;
-      $('logo-preview').src = dataUrl;
-      $('logo-preview').style.display = 'block';
-      $('logo-placeholder').style.display = 'none';
-      // Guardar temporalmente en el profile del state
-      if (!state.profile) state.profile = {};
-      state.profile.logoDataUrl = dataUrl;
-    };
-    reader.readAsDataURL(file);
-  });
-
-  // PERFIL: guardar
-  $('btn-save-profile').addEventListener('click', () => {
-    const profile = {
-      name:       $('biz-name').value.trim(),
-      address:    $('biz-address').value.trim(),
-      phone:      $('biz-phone').value.trim(),
-      email:      $('biz-email').value.trim(),
-      logoDataUrl: state.profile?.logoDataUrl || null
-    };
-
-    if (!profile.name) { showToast('Escribe el nombre del negocio'); return; }
-
-    saveProfile(profile);
-    applyProfileToUI(profile);
-    updateCatalogStats();
-    showToast('✓ Perfil guardado');
-    showView('view-home');
-  });
-
-  // PERFIL: saltar
-  $('skip-profile').addEventListener('click', e => {
-    e.preventDefault();
-    showView('view-home');
-  });
-
-  // HOME: ir a editar perfil
-  $('btn-go-profile').addEventListener('click', () => {
-    if (state.profile) applyProfileToUI(state.profile);
-    showView('view-profile');
-    // Cambiar botón a "Guardar cambios"
-    $('btn-save-profile').textContent = 'Guardar cambios';
-  });
-
-  // HOME: importar Excel
-  $('import-zone').addEventListener('click', () => $('excel-file').click());
-
-  $('excel-file').addEventListener('change', async e => {
-    const file = e.target.files[0];
-    if (!file) return;
-
-    showLoading('Importando catálogo...');
-    try {
-      const { flores, mecanico } = await parseExcel(file);
-
-      if (flores.length === 0 && mecanico.length === 0) {
-        showToast('⚠️ No se encontraron datos. ¿Es el archivo correcto?');
-        return;
-      }
-
-      state.flores   = flores;
-      state.mecanico = mecanico;
-      saveCatalog();
-      updateCatalogStats();
-
-      showToast('✓ ' + flores.length + ' flores y ' + mecanico.length + ' mecánicos importados');
-    } catch (err) {
-      console.error(err);
-      showToast('Error al leer el archivo Excel');
-    } finally {
-      hideLoading();
-      e.target.value = ''; // limpiar input
-    }
-  });
-
-  // HOME: nueva cotización
-  $('btn-nueva-cotizacion').addEventListener('click', () => {
-    if (state.flores.length === 0 && state.mecanico.length === 0) {
-      $('no-catalog-warning').style.display = 'block';
-      showToast('Importa tu catálogo primero');
-      return;
-    }
-    // Reiniciar proyecto
-    state.project = { nombre: '', cliente: '', fecha: '', items: [] };
-    const today = new Date().toISOString().split('T')[0];
-    $('proj-nombre').value = '';
-    $('proj-cliente').value = '';
-    $('proj-fecha').value  = today;
-    renderItems();
-    updateTotals();
-    setType('Flor');
-    showView('view-calculator');
-  });
-
-  // CALCULADORA: volver
-  $('btn-calc-back').addEventListener('click', () => showView('view-home'));
-
-  // CALCULADORA: búsqueda con autocomplete
-  $('search-input').addEventListener('input', e => {
-    const q    = e.target.value.trim().toLowerCase();
-    const pool = state.currentType === 'Flor' ? state.flores : state.mecanico;
-
-    state.selectedItem = null;
-    $('price-display').textContent = '—';
-
-    if (q.length < 1) { closeAutocomplete(); return; }
-
-    const matches = pool.filter(item =>
-      item.nombre.toLowerCase().includes(q)
-    );
-    openAutocomplete(matches);
-  });
-
-  $('search-input').addEventListener('blur', () => {
-    // Pequeño delay para que el click en el item funcione
-    setTimeout(closeAutocomplete, 200);
-  });
-
-  // CALCULADORA: agregar ítem
-  $('btn-add-item').addEventListener('click', addItem);
-
-  $('qty-input').addEventListener('keydown', e => {
-    if (e.key === 'Enter') addItem();
-  });
-
-  // CALCULADORA: ver cotización
-  $('btn-ver-cotizacion').addEventListener('click', () => {
-    // Guardar datos del proyecto desde los inputs
-    state.project.nombre  = $('proj-nombre').value.trim();
-    state.project.cliente = $('proj-cliente').value.trim();
-    state.project.fecha   = $('proj-fecha').value;
-
-    renderQuote();
-    showView('view-quote');
-  });
-
-  // COTIZACIÓN: volver a calculadora
-  $('btn-quote-back').addEventListener('click', () => showView('view-calculator'));
-
-  // COTIZACIÓN: descargar PDF
-  $('btn-download-pdf').addEventListener('click', downloadPDF);
-
-  // COTIZACIÓN: compartir por WhatsApp
-  $('btn-whatsapp').addEventListener('click', shareWhatsApp);
-}
-
-// ── Arrancar cuando el DOM esté listo ────────
-document.addEventListener('DOMContentLoaded', init);
+  checkExistingToken();
+});
